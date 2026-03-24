@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
+import json # 새로 추가됨!
 
 st.set_page_config(page_title="검역량 & 오퍼가 대시보드", layout="wide")
 
@@ -17,13 +18,25 @@ if not check_password():
     st.info("왼쪽 사이드바에 비밀번호를 입력해야 데이터를 볼 수 있습니다.")
     st.stop()
 
-# --- 1. 기존 과거 데이터(Qrt) 불러오기 ---
+# --- 구글 인증 통합 함수 (인터넷/로컬 모두 알아서 작동) ---
+def get_gspread_client():
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    
+    # 1. 인터넷(스트림릿 클라우드) 비밀 금고에 열쇠가 있는 경우
+    if "google_key" in st.secrets:
+        creds_dict = json.loads(st.secrets["google_key"])
+        credentials = Credentials.from_service_account_info(creds_dict, scopes=scope)
+    # 2. 내 컴퓨터(로컬)에 key.json 파일이 있는 경우
+    else:
+        credentials = Credentials.from_service_account_file('key.json', scopes=scope)
+        
+    return gspread.authorize(credentials)
+
+
+# --- 1. 과거 데이터(Qrt) 불러오기 ---
 @st.cache_data(ttl=7200)
 def load_data():
-    key_file = 'key.json' 
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    credentials = Credentials.from_service_account_file(key_file, scopes=scope)
-    gc = gspread.authorize(credentials)
+    gc = get_gspread_client()
     doc = gc.open('전략데이터 원본데이터') 
     worksheet = doc.worksheet('Qrt')
     data = worksheet.get_all_values()
@@ -34,13 +47,10 @@ def load_data():
     df['연월'] = df['연'].astype(str) + "-" + df['월'].astype(str).str.zfill(2)
     return df
 
-# --- 2. 신규 실시간 데이터(RAW) 불러오기 ---
+# --- 2. 실시간 데이터(RAW) 불러오기 ---
 @st.cache_data(ttl=3600)
 def load_raw_data():
-    key_file = 'key.json' 
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    credentials = Credentials.from_service_account_file(key_file, scopes=scope)
-    gc = gspread.authorize(credentials)
+    gc = get_gspread_client()
     doc = gc.open_by_url('https://docs.google.com/spreadsheets/d/1lSMxR62Qes09fKqmWUya2jFuEG0U4ScqsfjKlFJudnk/edit?gid=1705869223#gid=1705869223') 
     worksheet = doc.worksheet('RAW')
     data = worksheet.get_all_values()
@@ -55,10 +65,7 @@ def load_raw_data():
 # --- 3. 오퍼가 데이터 불러오기 ---
 @st.cache_data(ttl=3600)
 def load_offer_data():
-    key_file = 'key.json' 
-    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-    credentials = Credentials.from_service_account_file(key_file, scopes=scope)
-    gc = gspread.authorize(credentials)
+    gc = get_gspread_client()
     doc = gc.open_by_url('https://docs.google.com/spreadsheets/d/1Ke8Q5BHqeeZUZ90Pe7WSWIlppndtebqsq0yoApek1go/edit?gid=1724697100#gid=1724697100') 
     worksheet = next((ws for ws in doc.worksheets() if ws.id == 1724697100), doc.sheet1)
     data = worksheet.get_all_values()
@@ -79,7 +86,6 @@ df_offer = load_offer_data()
 # 좌측 사이드바: 바로가기 네비게이션
 # ==========================================
 st.sidebar.markdown("### 🚀 빠른 이동")
-# HTML 앵커(a 태그)를 활용한 스크롤 이동 링크
 st.sidebar.markdown('<a href="#quarantine" style="text-decoration:none; font-size:18px;">🥩 검역량 대시보드</a>', unsafe_allow_html=True)
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 st.sidebar.markdown('<a href="#offer" style="text-decoration:none; font-size:18px;">💵 오퍼가 분석</a>', unsafe_allow_html=True)
@@ -88,37 +94,26 @@ st.sidebar.markdown('<a href="#offer" style="text-decoration:none; font-size:18p
 # ==========================================
 # 메인 화면 1: 검역량 대시보드
 # ==========================================
-st.markdown('<div id="quarantine"></div>', unsafe_allow_html=True) # 검역량 앵커(도착지점)
+st.markdown('<div id="quarantine"></div>', unsafe_allow_html=True) 
 st.title("🥩 검역량 통합 대시보드")
 
 tab1, tab2, tab3 = st.tabs(["📊 조건별 통합 조회", "📈 월별 검역량 비교", "⚡ 실시간 검역 비교"])
 
-# ======== [탭 1] 조건별 통합 조회 ========
 with tab1:
     st.subheader("조건별 검역량 요약표")
-
-    # 사이드바에 있던 연/월 필터를 본문으로 가져오기
     sorted_years = sorted(df['연'].unique(), key=lambda x: int(x) if str(x).isdigit() else str(x))
     sorted_months = sorted(df['월'].unique(), key=lambda x: int(x) if str(x).isdigit() else str(x))
 
-    # 필터 드롭다운 6개를 가로 3개씩 2줄로 깔끔하게 배치
     col1, col2, col3 = st.columns(3)
-    with col1:
-        selected_year = st.selectbox("연도 선택", ['전체'] + sorted_years, key="tab1_year")
-    with col2:
-        selected_month = st.selectbox("월 선택", ['전체'] + sorted_months, key="tab1_month")
-    with col3:
-        selected_category = st.selectbox("세부구분 선택", ['전체'] + sorted(df['세부구분'].unique()), key="tab1_cat")
+    with col1: selected_year = st.selectbox("연도 선택", ['전체'] + sorted_years, key="tab1_year")
+    with col2: selected_month = st.selectbox("월 선택", ['전체'] + sorted_months, key="tab1_month")
+    with col3: selected_category = st.selectbox("세부구분 선택", ['전체'] + sorted(df['세부구분'].unique()), key="tab1_cat")
 
     col4, col5, col6 = st.columns(3)
-    with col4:
-        selected_item = st.selectbox("품목 선택", ['전체'] + sorted(df['품목'].unique()), key="tab1_item")
-    with col5:
-        selected_part = st.selectbox("부위 선택", ['전체'] + sorted(df['부위'].unique()), key="tab1_part")
-    with col6:
-        selected_country = st.selectbox("국가별 선택", ['전체'] + sorted(df['국가별'].unique()), key="tab1_country")
+    with col4: selected_item = st.selectbox("품목 선택", ['전체'] + sorted(df['품목'].unique()), key="tab1_item")
+    with col5: selected_part = st.selectbox("부위 선택", ['전체'] + sorted(df['부위'].unique()), key="tab1_part")
+    with col6: selected_country = st.selectbox("국가별 선택", ['전체'] + sorted(df['국가별'].unique()), key="tab1_country")
 
-    # 데이터 필터링 적용
     filtered_df = df.copy()
     if selected_year != '전체': filtered_df = filtered_df[filtered_df['연'] == selected_year]
     if selected_month != '전체': filtered_df = filtered_df[filtered_df['월'] == selected_month]
@@ -134,21 +129,15 @@ with tab1:
     else:
         st.warning("선택한 조건에 맞는 데이터가 없습니다.")
 
-# ======== [탭 2] 월별 검역량 비교 ========
 with tab2:
     st.subheader("기준월 vs 비교월 검역량 차이 분석")
-    
     col_t2_1, col_t2_2 = st.columns(2)
-    with col_t2_1:
-        selected_cat_t2 = st.selectbox("세부구분 선택", ['전체'] + sorted(df['세부구분'].unique()), key="t2_cat")
-    with col_t2_2:
-        selected_item_t2 = st.selectbox("품목 선택", ['전체'] + sorted(df['품목'].unique()), key="t2_item")
+    with col_t2_1: selected_cat_t2 = st.selectbox("세부구분 선택", ['전체'] + sorted(df['세부구분'].unique()), key="t2_cat")
+    with col_t2_2: selected_item_t2 = st.selectbox("품목 선택", ['전체'] + sorted(df['품목'].unique()), key="t2_item")
         
     col_t2_3, col_t2_4 = st.columns(2)
-    with col_t2_3:
-        selected_part_t2 = st.selectbox("부위 선택", ['전체'] + sorted(df['부위'].unique()), key="t2_part")
-    with col_t2_4:
-        selected_country_t2 = st.selectbox("국가별 선택", ['전체'] + sorted(df['국가별'].unique()), key="t2_country")
+    with col_t2_3: selected_part_t2 = st.selectbox("부위 선택", ['전체'] + sorted(df['부위'].unique()), key="t2_part")
+    with col_t2_4: selected_country_t2 = st.selectbox("국가별 선택", ['전체'] + sorted(df['국가별'].unique()), key="t2_country")
 
     f_df_t2 = df.copy()
     if selected_cat_t2 != '전체': f_df_t2 = f_df_t2[f_df_t2['세부구분'] == selected_cat_t2]
@@ -181,7 +170,6 @@ with tab2:
     else:
         st.warning("데이터가 없습니다.")
 
-# ======== [탭 3] 신규 실시간 검역 비교 ========
 with tab3:
     st.subheader("⚡ 실시간 당월(Ton) vs 과거 특정월 비교")
     sorted_ym_desc = sorted(df['연월'].unique(), reverse=True)
@@ -216,31 +204,24 @@ with tab3:
     else:
         st.warning("실시간 검역 데이터가 존재하지 않습니다.")
 
-
 # =====================================================================
 # 메인 화면 2: 오퍼가 분석
 # =====================================================================
-st.markdown("<br><br><br>", unsafe_allow_html=True) # 공간 여백 추가
-st.markdown("---") # 가로 구분선
-st.markdown('<div id="offer"></div>', unsafe_allow_html=True) # 오퍼가 앵커(도착지점)
+st.markdown("<br><br><br>", unsafe_allow_html=True) 
+st.markdown("---") 
+st.markdown('<div id="offer"></div>', unsafe_allow_html=True) 
 st.title("💵 오퍼가")
 
 if not df_offer.empty and '보정오퍼가' in df_offer.columns:
     col_o1, col_o2, col_o3 = st.columns(3)
-    with col_o1:
-        off_year = st.selectbox("연 선택", ['전체'] + sorted(df_offer['연'].unique())) if '연' in df_offer.columns else '전체'
-    with col_o2:
-        off_month = st.selectbox("월 선택", ['전체'] + sorted(df_offer['월'].unique())) if '월' in df_offer.columns else '전체'
-    with col_o3:
-        off_cat = st.selectbox("대분류 선택", ['전체'] + sorted(df_offer['대분류'].unique())) if '대분류' in df_offer.columns else '전체'
+    with col_o1: off_year = st.selectbox("연 선택", ['전체'] + sorted(df_offer['연'].unique())) if '연' in df_offer.columns else '전체'
+    with col_o2: off_month = st.selectbox("월 선택", ['전체'] + sorted(df_offer['월'].unique())) if '월' in df_offer.columns else '전체'
+    with col_o3: off_cat = st.selectbox("대분류 선택", ['전체'] + sorted(df_offer['대분류'].unique())) if '대분류' in df_offer.columns else '전체'
         
     col_o4, col_o5, col_o6 = st.columns(3)
-    with col_o4:
-        off_origin = st.selectbox("원산지 선택", ['전체'] + sorted(df_offer['원산지'].unique())) if '원산지' in df_offer.columns else '전체'
-    with col_o5:
-        off_item = st.selectbox("품목명 선택", ['전체'] + sorted(df_offer['품목명'].unique())) if '품목명' in df_offer.columns else '전체'
-    with col_o6:
-        off_grade = st.selectbox("등급 선택", ['전체'] + sorted(df_offer['등급'].unique())) if '등급' in df_offer.columns else '전체'
+    with col_o4: off_origin = st.selectbox("원산지 선택", ['전체'] + sorted(df_offer['원산지'].unique())) if '원산지' in df_offer.columns else '전체'
+    with col_o5: off_item = st.selectbox("품목명 선택", ['전체'] + sorted(df_offer['품목명'].unique())) if '품목명' in df_offer.columns else '전체'
+    with col_o6: off_grade = st.selectbox("등급 선택", ['전체'] + sorted(df_offer['등급'].unique())) if '등급' in df_offer.columns else '전체'
 
     filtered_offer = df_offer.copy()
     if off_year != '전체' and '연' in filtered_offer.columns: filtered_offer = filtered_offer[filtered_offer['연'] == off_year]
@@ -266,4 +247,4 @@ if not df_offer.empty and '보정오퍼가' in df_offer.columns:
     else:
         st.warning("선택한 조건에 맞는 데이터가 없습니다.")
 else:
-    st.warning("오퍼가 데이터를 불러오지 못했거나 '보정오퍼가' 컬럼이 존재하지 않습니다. 시트를 다시 확인해주세요.")
+    st.warning("오퍼가 데이터를 불러오지 못했거나 '보정오퍼가' 컬럼이 존재하지 않습니다.")
