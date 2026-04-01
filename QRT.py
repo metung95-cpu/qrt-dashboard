@@ -142,18 +142,25 @@ with tab2:
     if selected_country_t2 != '전체': f_df_t2 = f_df_t2[f_df_t2['국가별'] == selected_country_t2]
 
     sorted_ym = sorted(df['연월'].unique())
-    col3, col4 = st.columns(2)
+    col3, col4, col5 = st.columns(3)
     with col3: base_month = st.selectbox("기준월 (A) 선택", sorted_ym, index=0, key="t2_base")
-    with col4: target_month = st.selectbox("비교월 (B) 선택", sorted_ym, index=len(sorted_ym)-1, key="t2_target")
+    
+    default_b_idx = len(sorted_ym) - 2 if len(sorted_ym) > 1 else 0
+    with col4: target_month = st.selectbox("비교월 (B) 선택", sorted_ym, index=default_b_idx, key="t2_target")
+    
+    default_c_idx = len(sorted_ym) - 1 if len(sorted_ym) > 0 else 0
+    with col5: target_month_c = st.selectbox("비교월 (C) 선택", sorted_ym, index=default_c_idx, key="t2_target_c")
 
     if not f_df_t2.empty:
         comp_pivot = pd.pivot_table(f_df_t2, values='검역량', index=['세부구분', '품목', '부위', '국가별'], columns='연월', aggfunc='sum', fill_value=0)
-        start_m, end_m = (base_month, target_month) if base_month <= target_month else (target_month, base_month)
+        
+        start_m = min(base_month, target_month, target_month_c)
+        end_m = max(base_month, target_month, target_month_c)
         months_in_range = [m for m in sorted_ym if start_m <= m <= end_m]
         valid_months = [m for m in months_in_range if m in comp_pivot.columns]
         
-        # [신규 추가 지표 계산]
-        t_year, t_month = map(int, target_month.split('-'))
+        # [C를 최신 기준으로 산정하여 지표 계산]
+        t_year, t_month = map(int, target_month_c.split('-'))
         last_year_str = str(t_year - 1)
         this_year_str = str(t_year)
         
@@ -162,27 +169,30 @@ with tab2:
         else:
             prev_month_str = f"{t_year}-{t_month - 1:02d}"
 
-        # 1. 작년 평균 (비교월 연도의 작년)
+        # 1. 작년 평균 (비교월 C 기준)
         last_year_cols = [c for c in comp_pivot.columns if c.startswith(f"{last_year_str}-")]
         comp_pivot['작년평균'] = comp_pivot[last_year_cols].mean(axis=1) if last_year_cols else 0
         
-        # 2. 올해 월평균 (비교월 연도)
+        # 2. 올해 월평균 (비교월 C 기준)
         this_year_cols = [c for c in comp_pivot.columns if c.startswith(f"{this_year_str}-")]
         comp_pivot['올해 월평균'] = comp_pivot[this_year_cols].mean(axis=1) if this_year_cols else 0
 
-        # 3. 기간 평균 (A~B)
+        # 3. 기간 평균 (A~C 중 전체)
         comp_pivot['기간 평균'] = comp_pivot[valid_months].mean(axis=1) if valid_months else 0
         
-        val_B = comp_pivot[target_month] if target_month in comp_pivot.columns else 0
         val_A = comp_pivot[base_month] if base_month in comp_pivot.columns else 0
+        val_B = comp_pivot[target_month] if target_month in comp_pivot.columns else 0
+        val_C = comp_pivot[target_month_c] if target_month_c in comp_pivot.columns else 0
         val_prev = comp_pivot[prev_month_str] if prev_month_str in comp_pivot.columns else 0
         
         # 4. 차이 계산
-        comp_pivot['전월 차이'] = val_B - val_prev
-        comp_pivot['차이 (B - A)'] = val_B - val_A
+        comp_pivot['전월 차이(C-전월)'] = val_C - val_prev
+        comp_pivot['차이(B-A)'] = val_B - val_A
+        comp_pivot['차이(C-B)'] = val_C - val_B
+        comp_pivot['차이(C-A)'] = val_C - val_A
         
         # 보여줄 컬럼 순서 재배치
-        display_cols = valid_months + ['작년평균', '올해 월평균', '기간 평균', '전월 차이', '차이 (B - A)']
+        display_cols = valid_months + ['작년평균', '올해 월평균', '기간 평균', '전월 차이(C-전월)', '차이(B-A)', '차이(C-B)', '차이(C-A)']
         comp_pivot = comp_pivot[display_cols].reset_index()
         
         for col in comp_pivot.select_dtypes(include=['float64', 'int64']).columns:
