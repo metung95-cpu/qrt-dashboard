@@ -131,15 +131,26 @@ with tab2:
     with col_t2_1: selected_cat_t2 = st.selectbox("세부구분 선택", ['전체'] + sorted(df['세부구분'].unique()), key="t2_cat")
     with col_t2_2: selected_item_t2 = st.selectbox("품목 선택", ['전체'] + sorted(df['품목'].unique()), key="t2_item")
         
-    col_t2_3, col_t2_4 = st.columns(2)
-    with col_t2_3: selected_part_t2 = st.selectbox("부위 선택", ['전체'] + sorted(df['부위'].unique()), key="t2_part")
-    with col_t2_4: selected_country_t2 = st.selectbox("국가별 선택", ['전체'] + sorted(df['국가별'].unique()), key="t2_country")
+    col_t2_3, col_t2_4, col_t2_5 = st.columns(3)
+    with col_t2_3: selected_part_t2_1 = st.selectbox("부위 선택 1", ['전체'] + sorted(df['부위'].unique()), key="t2_part1")
+    with col_t2_4: selected_part_t2_2 = st.selectbox("부위 선택 2 (선택안함)", ['선택안함'] + sorted(df['부위'].unique()), key="t2_part2")
+    with col_t2_5: selected_country_t2 = st.selectbox("국가별 선택", ['전체'] + sorted(df['국가별'].unique()), key="t2_country")
 
     f_df_t2 = df.copy()
     if selected_cat_t2 != '전체': f_df_t2 = f_df_t2[f_df_t2['세부구분'] == selected_cat_t2]
     if selected_item_t2 != '전체': f_df_t2 = f_df_t2[f_df_t2['품목'] == selected_item_t2]
-    if selected_part_t2 != '전체': f_df_t2 = f_df_t2[f_df_t2['부위'] == selected_part_t2]
     if selected_country_t2 != '전체': f_df_t2 = f_df_t2[f_df_t2['국가별'] == selected_country_t2]
+
+    # 두 개의 부위 합산 필터링 적용
+    parts_to_filter = []
+    if selected_part_t2_1 != '전체': parts_to_filter.append(selected_part_t2_1)
+    if selected_part_t2_2 != '선택안함': parts_to_filter.append(selected_part_t2_2)
+
+    if parts_to_filter:
+        f_df_t2 = f_df_t2[f_df_t2['부위'].isin(parts_to_filter)].copy()
+        if len(parts_to_filter) > 1:
+            # 두 부위를 합쳐서 하나의 행으로 표시되도록 값 덮어쓰기
+            f_df_t2['부위'] = f"{parts_to_filter[0]} + {parts_to_filter[1]}"
 
     sorted_ym = sorted(df['연월'].unique())
     col3, col4, col5 = st.columns(3)
@@ -159,7 +170,6 @@ with tab2:
         months_in_range = [m for m in sorted_ym if start_m <= m <= end_m]
         valid_months = [m for m in months_in_range if m in comp_pivot.columns]
         
-        # [C를 최신 기준으로 산정하여 지표 계산]
         t_year, t_month = map(int, target_month_c.split('-'))
         last_year_str = str(t_year - 1)
         this_year_str = str(t_year)
@@ -169,15 +179,12 @@ with tab2:
         else:
             prev_month_str = f"{t_year}-{t_month - 1:02d}"
 
-        # 1. 작년 평균 (비교월 C 기준)
         last_year_cols = [c for c in comp_pivot.columns if c.startswith(f"{last_year_str}-")]
         comp_pivot['작년평균'] = comp_pivot[last_year_cols].mean(axis=1) if last_year_cols else 0
         
-        # 2. 올해 월평균 (비교월 C 기준)
         this_year_cols = [c for c in comp_pivot.columns if c.startswith(f"{this_year_str}-")]
         comp_pivot['올해 월평균'] = comp_pivot[this_year_cols].mean(axis=1) if this_year_cols else 0
 
-        # 3. 기간 평균 (A~C 중 전체)
         comp_pivot['기간 평균'] = comp_pivot[valid_months].mean(axis=1) if valid_months else 0
         
         val_A = comp_pivot[base_month] if base_month in comp_pivot.columns else 0
@@ -185,13 +192,11 @@ with tab2:
         val_C = comp_pivot[target_month_c] if target_month_c in comp_pivot.columns else 0
         val_prev = comp_pivot[prev_month_str] if prev_month_str in comp_pivot.columns else 0
         
-        # 4. 차이 계산
         comp_pivot['전월 차이(C-전월)'] = val_C - val_prev
         comp_pivot['차이(B-A)'] = val_B - val_A
         comp_pivot['차이(C-B)'] = val_C - val_B
         comp_pivot['차이(C-A)'] = val_C - val_A
         
-        # 보여줄 컬럼 순서 재배치
         display_cols = valid_months + ['작년평균', '올해 월평균', '기간 평균', '전월 차이(C-전월)', '차이(B-A)', '차이(C-B)', '차이(C-A)']
         comp_pivot = comp_pivot[display_cols].reset_index()
         
@@ -210,17 +215,32 @@ with tab3:
     with col_t3_1: sel_cat_t3 = st.selectbox("세부구분 선택", ['전체'] + sorted([x for x in df_raw['세부구분'].unique() if x]), key="t3_cat")
     with col_t3_2: sel_item_t3 = st.selectbox("품목 선택", ['전체'] + sorted([x for x in df_raw['품목'].unique() if x]), key="t3_item")
         
-    col_t3_3, col_t3_4, col_t3_5 = st.columns(3)
-    with col_t3_3: sel_part_t3 = st.selectbox("부위 선택", ['전체'] + sorted([x for x in df_raw.get('부위', pd.Series()).unique() if x]), key="t3_part") if '부위' in df_raw.columns else st.empty()
-    with col_t3_4: sel_country_t3 = st.selectbox("국가별 선택", ['전체'] + sorted([x for x in df_raw['국가별'].unique() if x]), key="t3_country")
-    with col_t3_5: view_mode_t3 = st.selectbox("표시 방식", ["국가별 상세 보기", "전국가 합계 보기"], key="t3_view")
+    col_t3_3, col_t3_4, col_t3_5, col_t3_6 = st.columns(4)
+    part_list = sorted([x for x in df_raw.get('부위', pd.Series()).unique() if x]) if '부위' in df_raw.columns else []
+    
+    with col_t3_3: sel_part_t3_1 = st.selectbox("부위 선택 1", ['전체'] + part_list, key="t3_part1") if '부위' in df_raw.columns else st.empty()
+    with col_t3_4: sel_part_t3_2 = st.selectbox("부위 선택 2 (선택안함)", ['선택안함'] + part_list, key="t3_part2") if '부위' in df_raw.columns else st.empty()
+    with col_t3_5: sel_country_t3 = st.selectbox("국가별 선택", ['전체'] + sorted([x for x in df_raw['국가별'].unique() if x]), key="t3_country")
+    with col_t3_6: view_mode_t3 = st.selectbox("표시 방식", ["국가별 상세 보기", "전국가 합계 보기"], key="t3_view")
 
     f_raw, f_hist = df_raw.copy(), df[df['연월'] == comp_hist_month].copy()
 
     if sel_cat_t3 != '전체': f_raw, f_hist = f_raw[f_raw['세부구분'] == sel_cat_t3], f_hist[f_hist['세부구분'] == sel_cat_t3]
     if sel_item_t3 != '전체': f_raw, f_hist = f_raw[f_raw['품목'] == sel_item_t3], f_hist[f_hist['품목'] == sel_item_t3]
-    if '부위' in df_raw.columns and sel_part_t3 != '전체': f_raw, f_hist = f_raw[f_raw['부위'] == sel_part_t3], f_hist[f_hist['부위'] == sel_part_t3]
     if sel_country_t3 != '전체': f_raw, f_hist = f_raw[f_raw['국가별'] == sel_country_t3], f_hist[f_hist['국가별'] == sel_country_t3]
+
+    if '부위' in df_raw.columns:
+        parts_to_filter_t3 = []
+        if sel_part_t3_1 != '전체': parts_to_filter_t3.append(sel_part_t3_1)
+        if sel_part_t3_2 != '선택안함': parts_to_filter_t3.append(sel_part_t3_2)
+
+        if parts_to_filter_t3:
+            f_raw = f_raw[f_raw['부위'].isin(parts_to_filter_t3)].copy()
+            f_hist = f_hist[f_hist['부위'].isin(parts_to_filter_t3)].copy()
+            if len(parts_to_filter_t3) > 1:
+                combined_name = f"{parts_to_filter_t3[0]} + {parts_to_filter_t3[1]}"
+                f_raw['부위'] = combined_name
+                f_hist['부위'] = combined_name
 
     if not f_raw.empty:
         if view_mode_t3 == "전국가 합계 보기":
