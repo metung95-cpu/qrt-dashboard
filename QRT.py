@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
-import json # 새로 추가됨!
+import json 
 
 st.set_page_config(page_title="검역량 & 오퍼가 대시보드", layout="wide")
 
@@ -179,9 +179,11 @@ with tab3:
     with col_t3_1: sel_cat_t3 = st.selectbox("세부구분 선택", ['전체'] + sorted([x for x in df_raw['세부구분'].unique() if x]), key="t3_cat")
     with col_t3_2: sel_item_t3 = st.selectbox("품목 선택", ['전체'] + sorted([x for x in df_raw['품목'].unique() if x]), key="t3_item")
         
-    col_t3_3, col_t3_4 = st.columns(2)
+    # [새로 추가된 기능] 3칸으로 쪼개서 표시 방식 드롭다운 추가
+    col_t3_3, col_t3_4, col_t3_5 = st.columns(3)
     with col_t3_3: sel_part_t3 = st.selectbox("부위 선택", ['전체'] + sorted([x for x in df_raw.get('부위', pd.Series()).unique() if x]), key="t3_part") if '부위' in df_raw.columns else st.empty()
     with col_t3_4: sel_country_t3 = st.selectbox("국가별 선택", ['전체'] + sorted([x for x in df_raw['국가별'].unique() if x]), key="t3_country")
+    with col_t3_5: view_mode_t3 = st.selectbox("표시 방식", ["국가별 상세 보기", "전국가 합계 보기"], key="t3_view")
 
     f_raw, f_hist = df_raw.copy(), df[df['연월'] == comp_hist_month].copy()
 
@@ -191,11 +193,24 @@ with tab3:
     if sel_country_t3 != '전체': f_raw, f_hist = f_raw[f_raw['국가별'] == sel_country_t3], f_hist[f_hist['국가별'] == sel_country_t3]
 
     if not f_raw.empty:
-        merge_on = ['세부구분', '품목', '부위', '국가별'] if '부위' in f_raw.columns else ['세부구분', '품목', '국가별']
+        # 합계 보기를 선택하면 그룹화 기준에서 '국가별'을 빼서 하나로 뭉쳐버림
+        if view_mode_t3 == "전국가 합계 보기":
+            merge_on = ['세부구분', '품목', '부위'] if '부위' in f_raw.columns else ['세부구분', '품목']
+        else:
+            merge_on = ['세부구분', '품목', '부위', '국가별'] if '부위' in f_raw.columns else ['세부구분', '품목', '국가별']
+
         raw_grp = f_raw.groupby(merge_on)['당월누계(Ton)'].sum().reset_index().rename(columns={'당월누계(Ton)': '실시간 당월 (Ton)'})
         hist_grp = f_hist.groupby(merge_on)['검역량'].sum().reset_index().rename(columns={'검역량': f'과거 {comp_hist_month} (Ton)'})
         
         merged_df = pd.merge(raw_grp, hist_grp, on=merge_on, how='outer').fillna(0)
+        
+        # 뭉쳤을 때 표에 '국가별' 칸이 비어있지 않게 채워주기
+        if view_mode_t3 == "전국가 합계 보기":
+            merged_df['국가별'] = '전국가 합계'
+            # 컬럼 순서 원래대로 맞추기
+            cols_order = merge_on + ['국가별', '실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)']
+            merged_df = merged_df[cols_order]
+
         merged_df['차이 (실시간 - 과거)'] = merged_df['실시간 당월 (Ton)'] - merged_df[f'과거 {comp_hist_month} (Ton)']
         
         for col in ['실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '차이 (실시간 - 과거)']:
