@@ -120,6 +120,15 @@ with tab1:
 
     if not filtered_df.empty:
         pivot_df = pd.pivot_table(filtered_df, values='검역량', index=['연', '월', '세부구분', '품목', '부위', '국가별'], aggfunc='sum').reset_index()
+        
+        # [정렬 기능 추가]
+        st.markdown("---")
+        sort_t1 = st.radio("⬇️ 표 정렬 방식", ["기본", "검역량 내림차순 (큰 수부터)", "검역량 오름차순 (작은 수부터)"], horizontal=True, key="t1_sort")
+        if "내림차순" in sort_t1:
+            pivot_df = pivot_df.sort_values('검역량', ascending=False)
+        elif "오름차순" in sort_t1:
+            pivot_df = pivot_df.sort_values('검역량', ascending=True)
+
         pivot_df['검역량'] = pivot_df['검역량'].apply(lambda x: f"{x:,.2f}")
         st.dataframe(pivot_df, use_container_width=True, hide_index=True)
     else:
@@ -141,7 +150,6 @@ with tab2:
     if selected_item_t2 != '전체': f_df_t2 = f_df_t2[f_df_t2['품목'] == selected_item_t2]
     if selected_country_t2 != '전체': f_df_t2 = f_df_t2[f_df_t2['국가별'] == selected_country_t2]
 
-    # 두 개의 부위 합산 필터링 적용
     parts_to_filter = []
     if selected_part_t2_1 != '전체': parts_to_filter.append(selected_part_t2_1)
     if selected_part_t2_2 != '선택안함': parts_to_filter.append(selected_part_t2_2)
@@ -149,7 +157,6 @@ with tab2:
     if parts_to_filter:
         f_df_t2 = f_df_t2[f_df_t2['부위'].isin(parts_to_filter)].copy()
         if len(parts_to_filter) > 1:
-            # 두 부위를 합쳐서 하나의 행으로 표시되도록 값 덮어쓰기
             f_df_t2['부위'] = f"{parts_to_filter[0]} + {parts_to_filter[1]}"
 
     sorted_ym = sorted(df['연월'].unique())
@@ -199,6 +206,17 @@ with tab2:
         
         display_cols = valid_months + ['작년평균', '올해 월평균', '기간 평균', '전월 차이(C-전월)', '차이(B-A)', '차이(C-B)', '차이(C-A)']
         comp_pivot = comp_pivot[display_cols].reset_index()
+
+        # [정렬 기능 추가]
+        st.markdown("---")
+        sort_c1, sort_c2 = st.columns(2)
+        with sort_c1:
+            sort_col_t2 = st.selectbox("⬇️ 표 정렬 기준 열", display_cols, index=len(display_cols)-1, key="t2_sort_col")
+        with sort_c2:
+            sort_ord_t2 = st.radio("정렬 방식", ["내림차순 (큰 수부터)", "오름차순 (작은 수부터)"], horizontal=True, key="t2_sort_ord")
+
+        is_ascending_t2 = True if "오름차순" in sort_ord_t2 else False
+        comp_pivot = comp_pivot.sort_values(sort_col_t2, ascending=is_ascending_t2)
         
         for col in comp_pivot.select_dtypes(include=['float64', 'int64']).columns:
             comp_pivot[col] = comp_pivot[col].apply(lambda x: f"{x:,.2f}")
@@ -260,7 +278,19 @@ with tab3:
 
         merged_df['차이 (실시간 - 과거)'] = merged_df['실시간 당월 (Ton)'] - merged_df[f'과거 {comp_hist_month} (Ton)']
         
-        for col in ['실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '차이 (실시간 - 과거)']:
+        # [정렬 기능 추가]
+        st.markdown("---")
+        t3_num_cols = ['실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '차이 (실시간 - 과거)']
+        sort_c3_1, sort_c3_2 = st.columns(2)
+        with sort_c3_1:
+            sort_col_t3 = st.selectbox("⬇️ 표 정렬 기준 열", t3_num_cols, index=0, key="t3_sort_col")
+        with sort_c3_2:
+            sort_ord_t3 = st.radio("정렬 방식", ["내림차순 (큰 수부터)", "오름차순 (작은 수부터)"], horizontal=True, key="t3_sort_ord")
+
+        is_ascending_t3 = True if "오름차순" in sort_ord_t3 else False
+        merged_df = merged_df.sort_values(sort_col_t3, ascending=is_ascending_t3)
+
+        for col in t3_num_cols:
             merged_df[col] = merged_df[col].apply(lambda x: f"{x:,.2f}")
         st.dataframe(merged_df, use_container_width=True, hide_index=True)
     else:
