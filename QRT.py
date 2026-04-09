@@ -263,9 +263,11 @@ with tab2:
             comp_pivot_numeric['_temp_sort'] = pd.to_numeric(comp_pivot_numeric[sort_col_t2].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
             comp_pivot_numeric = comp_pivot_numeric.sort_values('_temp_sort', ascending=is_ascending_t2).drop(columns=['_temp_sort'])
         
-        # 고정 없이 안전하게 출력 (KeyError 완벽 방지)
+        if '품목' in comp_pivot_numeric.columns:
+            comp_pivot_numeric = comp_pivot_numeric.set_index('품목')
+
         final_styled_df = comp_pivot_numeric.style.apply(color_cells, axis=1)
-        st.dataframe(final_styled_df, use_container_width=True, hide_index=True) 
+        st.dataframe(final_styled_df, use_container_width=True) 
     else:
         st.warning("데이터가 없습니다.")
 
@@ -290,7 +292,8 @@ with tab3:
 
     f_raw, f_hist = df_raw.copy(), df[df['연월'] == comp_hist_month].copy()
     
-    f_hist_avg = df[df['연'].astype(str).str[:4].isin(['2021', '2022', '2023', '2024', '2025', '2026'])].copy()
+    # [수정] 21~26년 평균에서 25년 평균만 구하도록 데이터 필터 변경
+    f_hist_avg = df[df['연'].astype(str).str[:4] == '2025'].copy()
 
     if sel_cat_t3 != '전체': 
         f_raw = f_raw[f_raw['세부구분'] == sel_cat_t3]
@@ -333,14 +336,15 @@ with tab3:
         hist_grp = f_hist.groupby(merge_on)['검역량'].sum().reset_index().rename(columns={'검역량': f'과거 {comp_hist_month} (Ton)'})
         
         avg_monthly = f_hist_avg.groupby(merge_on + ['연월'])['검역량'].sum().reset_index()
-        avg_grp = avg_monthly.groupby(merge_on)['검역량'].mean().reset_index().rename(columns={'검역량': '21~26년 월평균'})
+        # [수정] 컬럼명 25년 월평균으로 변경
+        avg_grp = avg_monthly.groupby(merge_on)['검역량'].mean().reset_index().rename(columns={'검역량': '25년 월평균'})
         
         merged_df = pd.merge(raw_grp, hist_grp, on=merge_on, how='outer').fillna(0)
         merged_df = pd.merge(merged_df, avg_grp, on=merge_on, how='left').fillna(0)
         
         if sel_country_t3 == "전국가 합계":
             merged_df['국가별'] = '전국가 합계'
-            cols_order = merge_on + ['국가별', '실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '21~26년 월평균']
+            cols_order = merge_on + ['국가별', '실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '25년 월평균']
             merged_df = merged_df[cols_order]
 
         merged_df['차이 (실시간 - 과거)'] = merged_df['실시간 당월 (Ton)'] - merged_df[f'과거 {comp_hist_month} (Ton)']
@@ -354,7 +358,7 @@ with tab3:
         merged_df.loc[merged_df['실시간 당월 (Ton)'] == 0, '_exceed'] = False 
 
         st.markdown("---")
-        t3_num_cols = ['실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '21~26년 월평균', '차이 (실시간 - 과거)']
+        t3_num_cols = ['실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '25년 월평균', '차이 (실시간 - 과거)']
         sort_c3_1, sort_c3_2 = st.columns(2)
         with sort_c3_1:
             sort_col_t3 = st.selectbox("⬇️ 표 정렬 기준 열", t3_num_cols, index=0, key="t3_sort_col")
@@ -367,18 +371,22 @@ with tab3:
         for col in t3_num_cols:
             merged_df[col] = pd.to_numeric(merged_df[col], errors='coerce').fillna(0).round(0).apply(lambda x: f"{x:,.0f}")
 
-        # 고정 없이 안전하게 출력 (KeyError 완벽 방지)
-        display_df_t3 = merged_df.drop(columns=['_exceed'])
+        if '품목' in merged_df.columns:
+            merged_df_indexed = merged_df.set_index('품목')
+        else:
+            merged_df_indexed = merged_df.copy()
+            
+        display_df_t3 = merged_df_indexed.drop(columns=['_exceed'])
 
         def get_t3_styles(df_to_style):
             style_df = pd.DataFrame('', index=df_to_style.index, columns=df_to_style.columns)
-            exceed_mask = merged_df['_exceed'].values 
+            exceed_mask = merged_df_indexed['_exceed'].values 
             for col in style_df.columns:
                 style_df.loc[exceed_mask, col] = 'color: #D32F2F; font-weight: bold;' 
             return style_df
 
         final_styled_t3 = display_df_t3.style.apply(get_t3_styles, axis=None)
-        st.dataframe(final_styled_t3, use_container_width=True, hide_index=True) 
+        st.dataframe(final_styled_t3, use_container_width=True) 
     else:
         st.warning("실시간 검역 데이터가 존재하지 않습니다.")
 
