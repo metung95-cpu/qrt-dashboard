@@ -28,6 +28,7 @@ def get_gspread_client():
         credentials = Credentials.from_service_account_file('key.json', scopes=scope)
     return gspread.authorize(credentials)
 
+
 # --- 1. 과거 데이터(Qrt) 불러오기 ---
 @st.cache_data(ttl=7200)
 def load_data():
@@ -76,6 +77,7 @@ df = load_data()
 df_raw = load_raw_data()
 df_offer = load_offer_data()
 
+
 # ==========================================
 # 좌측 사이드바
 # ==========================================
@@ -83,6 +85,7 @@ st.sidebar.markdown("### 🚀 빠른 이동")
 st.sidebar.markdown('<a href="#quarantine" style="text-decoration:none; font-size:18px;">🥩 검역량 대시보드</a>', unsafe_allow_html=True)
 st.sidebar.markdown("<br>", unsafe_allow_html=True)
 st.sidebar.markdown('<a href="#offer" style="text-decoration:none; font-size:18px;">💵 오퍼가 분석</a>', unsafe_allow_html=True)
+
 
 # ==========================================
 # 메인 화면 1: 검역량 대시보드
@@ -214,32 +217,32 @@ with tab2:
         for col in final_cols:
             comp_pivot[col] = pd.to_numeric(comp_pivot[col], errors='coerce').fillna(0).round(0).apply(lambda x: f"{x:,.0f}")
 
-        # [핵심] 동적 글자 색상 로직 (비교월이 크면 무조건 파란색)
+        # [핵심 변경] 연한 빨강 없애고, 모던한 진한 회색 톤 + 시인성 높은 파스텔톤 글씨 적용
         def color_cells(row):
             styles = []
             for col_name in row.index:
                 col_str = str(col_name)
                 
-                # 안전하게 숫자로 변환 (쉼표 제거)
                 try:
                     val = float(str(row[col_name]).replace(',', ''))
                 except:
                     val = 0.0
 
                 if '합계' in col_str:
-                    styles.append('background-color: #757575; color: #FFFFFF; font-weight: bold;') # 진한 회색
+                    styles.append('background-color: #616161; color: #FFFFFF; font-weight: bold;') # 진한 회색
                 elif '평균' in col_str and '비교월' not in col_str:
-                    styles.append('background-color: #EEEEEE; color: #212121; font-weight: bold;') # 연한 회색
+                    styles.append('background-color: #F5F5F5; color: #212121; font-weight: bold;') # 연한 회색
                 elif col_str in calc_cols:
-                    bg_color = 'background-color: #FFEBEE;' # 배경: 연한 빨강
-                    text_color = 'color: #B71C1C;' # 기본 글자색: 진한 빨강
+                    bg_color = 'background-color: #424242;' # 비교 셀: 진하고 세련된 다크 그레이
+                    text_color = 'color: #FFFFFF;' # 기본 흰색 글씨
                     
+                    # 어두운 배경에 잘 보이도록 밝은 파스텔톤 파랑/빨강 사용
                     if col_str == '비교월 - 직전월':
-                        if val > 0: text_color = 'color: #1565C0;' # 비교월이 큼 (파랑)
-                        elif val < 0: text_color = 'color: #C62828;' # 직전월이 큼 (빨강)
+                        if val > 0: text_color = 'color: #81D4FA;' # 비교월이 큼 (밝은 파랑)
+                        elif val < 0: text_color = 'color: #EF9A9A;' # 직전월이 큼 (밝은 빨강)
                     elif col_str in ['올해평균 - 비교월', '작년평균 - 비교월', '작년동월 - 비교월']:
-                        if val < 0: text_color = 'color: #1565C0;' # 음수면 비교월이 큰 것임 (파랑)
-                        elif val > 0: text_color = 'color: #C62828;' # 양수면 비교월이 작은 것임 (빨강)
+                        if val < 0: text_color = 'color: #81D4FA;' # 음수면 비교월이 큰 것임 (밝은 파랑)
+                        elif val > 0: text_color = 'color: #EF9A9A;' # 양수면 비교월이 작은 것임 (밝은 빨강)
                     
                     styles.append(f'{bg_color} {text_color} font-weight: bold;')
                 else:
