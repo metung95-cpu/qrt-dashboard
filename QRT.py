@@ -270,11 +270,9 @@ with tab2:
             comp_pivot_numeric['_temp_sort'] = pd.to_numeric(comp_pivot_numeric[sort_col_t2].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
             comp_pivot_numeric = comp_pivot_numeric.sort_values('_temp_sort', ascending=is_ascending_t2).drop(columns=['_temp_sort'])
         
-        if '품목' in comp_pivot_numeric.columns:
-            comp_pivot_numeric = comp_pivot_numeric.set_index('품목')
-
+        # [복구] index 설정 부분(에러 원인) 삭제!
         final_styled_df = comp_pivot_numeric.style.apply(color_cells, axis=1)
-        st.dataframe(final_styled_df, use_container_width=True) 
+        st.dataframe(final_styled_df, use_container_width=True, hide_index=True) 
     else:
         st.warning("데이터가 없습니다.")
 
@@ -383,16 +381,12 @@ with tab3:
         for col in t3_num_cols:
             merged_df[col] = pd.to_numeric(merged_df[col], errors='coerce').fillna(0).round(0).apply(lambda x: f"{x:,.0f}")
 
-        if '품목' in merged_df.columns:
-            merged_df_indexed = merged_df.set_index('품목')
-        else:
-            merged_df_indexed = merged_df.copy()
-            
-        display_df_t3 = merged_df_indexed.drop(columns=['_pacing_status'])
+        # [복구] index 설정 부분(에러 원인) 삭제!
+        display_df_t3 = merged_df.drop(columns=['_pacing_status'])
 
         def color_t3_styles(df_to_style):
             style_df = pd.DataFrame('', index=df_to_style.index, columns=df_to_style.columns)
-            status_series = merged_df_indexed['_pacing_status'].values
+            status_series = merged_df['_pacing_status'].values
             
             for i, status in enumerate(status_series):
                 if status == 1: 
@@ -402,7 +396,7 @@ with tab3:
             return style_df
 
         final_styled_t3 = display_df_t3.style.apply(color_t3_styles, axis=None)
-        st.dataframe(final_styled_t3, use_container_width=True) 
+        st.dataframe(final_styled_t3, use_container_width=True, hide_index=True) 
     else:
         st.warning("실시간 검역 데이터가 존재하지 않습니다.")
 
