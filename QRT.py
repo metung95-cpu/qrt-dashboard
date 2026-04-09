@@ -263,12 +263,9 @@ with tab2:
             comp_pivot_numeric['_temp_sort'] = pd.to_numeric(comp_pivot_numeric[sort_col_t2].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
             comp_pivot_numeric = comp_pivot_numeric.sort_values('_temp_sort', ascending=is_ascending_t2).drop(columns=['_temp_sort'])
         
-        # [핵심 변경] 공간 확보를 위해 오직 '품목'만 인덱스(틀 고정)로 설정합니다!
-        if '품목' in comp_pivot_numeric.columns:
-            comp_pivot_numeric = comp_pivot_numeric.set_index('품목')
-
+        # 고정 없이 안전하게 출력 (KeyError 완벽 방지)
         final_styled_df = comp_pivot_numeric.style.apply(color_cells, axis=1)
-        st.dataframe(final_styled_df, use_container_width=True) 
+        st.dataframe(final_styled_df, use_container_width=True, hide_index=True) 
     else:
         st.warning("데이터가 없습니다.")
 
@@ -370,24 +367,18 @@ with tab3:
         for col in t3_num_cols:
             merged_df[col] = pd.to_numeric(merged_df[col], errors='coerce').fillna(0).round(0).apply(lambda x: f"{x:,.0f}")
 
-        # [핵심 변경] 공간 확보를 위해 오직 '품목'만 인덱스(틀 고정)로 설정합니다!
-        if '품목' in merged_df.columns:
-            merged_df_indexed = merged_df.set_index('품목')
-        else:
-            merged_df_indexed = merged_df.copy()
-            
-        display_df_t3 = merged_df_indexed.drop(columns=['_exceed'])
+        # 고정 없이 안전하게 출력 (KeyError 완벽 방지)
+        display_df_t3 = merged_df.drop(columns=['_exceed'])
 
         def get_t3_styles(df_to_style):
             style_df = pd.DataFrame('', index=df_to_style.index, columns=df_to_style.columns)
-            # 중복 데이터 에러를 완벽 방지하는 안전 코드 (.values 활용)
-            exceed_mask = merged_df_indexed['_exceed'].values 
+            exceed_mask = merged_df['_exceed'].values 
             for col in style_df.columns:
                 style_df.loc[exceed_mask, col] = 'color: #D32F2F; font-weight: bold;' 
             return style_df
 
         final_styled_t3 = display_df_t3.style.apply(get_t3_styles, axis=None)
-        st.dataframe(final_styled_t3, use_container_width=True) 
+        st.dataframe(final_styled_t3, use_container_width=True, hide_index=True) 
     else:
         st.warning("실시간 검역 데이터가 존재하지 않습니다.")
 
