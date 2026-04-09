@@ -3,6 +3,8 @@ import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 import json 
+from datetime import datetime
+import calendar
 
 st.set_page_config(page_title="검역량 & 오퍼가 대시보드", layout="wide")
 
@@ -217,7 +219,6 @@ with tab2:
         for col in final_cols:
             comp_pivot[col] = pd.to_numeric(comp_pivot[col], errors='coerce').fillna(0).round(0).apply(lambda x: f"{x:,.0f}")
 
-        # [핵심 변경] 연한 빨강 없애고, 모던한 진한 회색 톤 + 시인성 높은 파스텔톤 글씨 적용
         def color_cells(row):
             styles = []
             for col_name in row.index:
@@ -229,20 +230,19 @@ with tab2:
                     val = 0.0
 
                 if '합계' in col_str:
-                    styles.append('background-color: #616161; color: #FFFFFF; font-weight: bold;') # 진한 회색
+                    styles.append('background-color: #616161; color: #FFFFFF; font-weight: bold;') 
                 elif '평균' in col_str and '비교월' not in col_str:
-                    styles.append('background-color: #F5F5F5; color: #212121; font-weight: bold;') # 연한 회색
+                    styles.append('background-color: #F5F5F5; color: #212121; font-weight: bold;') 
                 elif col_str in calc_cols:
-                    bg_color = 'background-color: #424242;' # 비교 셀: 진하고 세련된 다크 그레이
-                    text_color = 'color: #FFFFFF;' # 기본 흰색 글씨
+                    bg_color = 'background-color: #424242;' 
+                    text_color = 'color: #FFFFFF;' 
                     
-                    # 어두운 배경에 잘 보이도록 밝은 파스텔톤 파랑/빨강 사용
                     if col_str == '비교월 - 직전월':
-                        if val > 0: text_color = 'color: #81D4FA;' # 비교월이 큼 (밝은 파랑)
-                        elif val < 0: text_color = 'color: #EF9A9A;' # 직전월이 큼 (밝은 빨강)
+                        if val > 0: text_color = 'color: #81D4FA;' 
+                        elif val < 0: text_color = 'color: #EF9A9A;' 
                     elif col_str in ['올해평균 - 비교월', '작년평균 - 비교월', '작년동월 - 비교월']:
-                        if val < 0: text_color = 'color: #81D4FA;' # 음수면 비교월이 큰 것임 (밝은 파랑)
-                        elif val > 0: text_color = 'color: #EF9A9A;' # 양수면 비교월이 작은 것임 (밝은 빨강)
+                        if val < 0: text_color = 'color: #81D4FA;' 
+                        elif val > 0: text_color = 'color: #EF9A9A;' 
                     
                     styles.append(f'{bg_color} {text_color} font-weight: bold;')
                 else:
@@ -263,8 +263,12 @@ with tab2:
             comp_pivot_numeric['_temp_sort'] = pd.to_numeric(comp_pivot_numeric[sort_col_t2].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
             comp_pivot_numeric = comp_pivot_numeric.sort_values('_temp_sort', ascending=is_ascending_t2).drop(columns=['_temp_sort'])
         
+        # [핵심 변경] 세부구분, 품목, 부위, 국가별 열을 인덱스로 변환하여 스크롤 시 왼쪽에 틀 고정되도록 함
+        freeze_cols_t2 = [c for c in ['세부구분', '품목', '부위', '국가별'] if c in comp_pivot_numeric.columns]
+        comp_pivot_numeric = comp_pivot_numeric.set_index(freeze_cols_t2)
+
         final_styled_df = comp_pivot_numeric.style.apply(color_cells, axis=1)
-        st.dataframe(final_styled_df, use_container_width=True, hide_index=True)
+        st.dataframe(final_styled_df, use_container_width=True) # hide_index=True를 제거하여 고정된 인덱스가 보이게 함
     else:
         st.warning("데이터가 없습니다.")
 
@@ -280,16 +284,47 @@ with tab3:
     col_t3_3, col_t3_4 = st.columns(2)
     part_list = sorted([x for x in df_raw.get('부위', pd.Series()).unique() if x]) if '부위' in df_raw.columns else []
     
-    with col_t3_3: sel_part_t3 = st.selectbox("부위 선택", ['전체'] + part_list, key="t3_part") if '부위' in df_raw.columns else st.empty()
-    with col_t3_4: sel_country_t3 = st.selectbox("국가별 선택", ['전체(개별)', '전국가 합계'] + sorted([x for x in df_raw['국가별'].unique() if x]), key="t3_country")
+    with col_t3_3: sel_part_t3_1 = st.selectbox("부위 선택 1", ['전체'] + part_list, key="t3_part1") if '부위' in df_raw.columns else st.empty()
+    with col_t3_4: sel_part_t3_2 = st.selectbox("부위 선택 2 (선택안함)", ['선택안함'] + part_list, key="t3_part2") if '부위' in df_raw.columns else st.empty()
+    
+    col_t3_5, col_t3_6 = st.columns(2)
+    with col_t3_5: sel_country_t3 = st.selectbox("국가별 선택", ['전체(개별)', '전국가 합계'] + sorted([x for x in df_raw['국가별'].unique() if x]), key="t3_country")
+    with col_t3_6: view_mode_t3 = st.selectbox("표시 방식", ["국가별 상세 보기", "전국가 합계 보기"], key="t3_view")
 
     f_raw, f_hist = df_raw.copy(), df[df['연월'] == comp_hist_month].copy()
+    
+    f_hist_avg = df[df['연'].astype(str).str[:4].isin(['2021', '2022', '2023', '2024', '2025', '2026'])].copy()
 
-    if sel_cat_t3 != '전체': f_raw, f_hist = f_raw[f_raw['세부구분'] == sel_cat_t3], f_hist[f_hist['세부구분'] == sel_cat_t3]
-    if sel_item_t3 != '전체': f_raw, f_hist = f_raw[f_raw['품목'] == sel_item_t3], f_hist[f_hist['품목'] == sel_item_t3]
-    if '부위' in df_raw.columns and sel_part_t3 != '전체': f_raw, f_hist = f_raw[f_raw['부위'] == sel_part_t3], f_hist[f_hist['부위'] == sel_part_t3]
+    if sel_cat_t3 != '전체': 
+        f_raw = f_raw[f_raw['세부구분'] == sel_cat_t3]
+        f_hist = f_hist[f_hist['세부구분'] == sel_cat_t3]
+        f_hist_avg = f_hist_avg[f_hist_avg['세부구분'] == sel_cat_t3]
+        
+    if sel_item_t3 != '전체': 
+        f_raw = f_raw[f_raw['품목'] == sel_item_t3]
+        f_hist = f_hist[f_hist['품목'] == sel_item_t3]
+        f_hist_avg = f_hist_avg[f_hist_avg['품목'] == sel_item_t3]
+        
     if sel_country_t3 not in ['전체(개별)', '전국가 합계']: 
-        f_raw, f_hist = f_raw[f_raw['국가별'] == sel_country_t3], f_hist[f_hist['국가별'] == sel_country_t3]
+        f_raw = f_raw[f_raw['국가별'] == sel_country_t3]
+        f_hist = f_hist[f_hist['국가별'] == sel_country_t3]
+        f_hist_avg = f_hist_avg[f_hist_avg['국가별'] == sel_country_t3]
+
+    if '부위' in df_raw.columns:
+        parts_to_filter_t3 = []
+        if sel_part_t3_1 != '전체': parts_to_filter_t3.append(sel_part_t3_1)
+        if sel_part_t3_2 != '선택안함': parts_to_filter_t3.append(sel_part_t3_2)
+
+        if parts_to_filter_t3:
+            f_raw = f_raw[f_raw['부위'].isin(parts_to_filter_t3)].copy()
+            f_hist = f_hist[f_hist['부위'].isin(parts_to_filter_t3)].copy()
+            f_hist_avg = f_hist_avg[f_hist_avg['부위'].isin(parts_to_filter_t3)].copy()
+            
+            if len(parts_to_filter_t3) > 1:
+                combined_name = f"{parts_to_filter_t3[0]} + {parts_to_filter_t3[1]}"
+                f_raw['부위'] = combined_name
+                f_hist['부위'] = combined_name
+                f_hist_avg['부위'] = combined_name
 
     if not f_raw.empty:
         if sel_country_t3 == "전국가 합계":
@@ -300,17 +335,29 @@ with tab3:
         raw_grp = f_raw.groupby(merge_on)['당월누계(Ton)'].sum().reset_index().rename(columns={'당월누계(Ton)': '실시간 당월 (Ton)'})
         hist_grp = f_hist.groupby(merge_on)['검역량'].sum().reset_index().rename(columns={'검역량': f'과거 {comp_hist_month} (Ton)'})
         
+        avg_monthly = f_hist_avg.groupby(merge_on + ['연월'])['검역량'].sum().reset_index()
+        avg_grp = avg_monthly.groupby(merge_on)['검역량'].mean().reset_index().rename(columns={'검역량': '21~26년 월평균'})
+        
         merged_df = pd.merge(raw_grp, hist_grp, on=merge_on, how='outer').fillna(0)
+        merged_df = pd.merge(merged_df, avg_grp, on=merge_on, how='left').fillna(0)
         
         if sel_country_t3 == "전국가 합계":
             merged_df['국가별'] = '전국가 합계'
-            cols_order = merge_on + ['국가별', '실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)']
+            cols_order = merge_on + ['국가별', '실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '21~26년 월평균']
             merged_df = merged_df[cols_order]
 
         merged_df['차이 (실시간 - 과거)'] = merged_df['실시간 당월 (Ton)'] - merged_df[f'과거 {comp_hist_month} (Ton)']
         
+        today = datetime.now()
+        cur_day = today.day
+        total_days = calendar.monthrange(today.year, today.month)[1]
+        pacing_multiplier = total_days / cur_day if cur_day > 0 else 1
+        
+        merged_df['_exceed'] = (merged_df['실시간 당월 (Ton)'] * pacing_multiplier) > merged_df[f'과거 {comp_hist_month} (Ton)']
+        merged_df.loc[merged_df['실시간 당월 (Ton)'] == 0, '_exceed'] = False 
+
         st.markdown("---")
-        t3_num_cols = ['실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '차이 (실시간 - 과거)']
+        t3_num_cols = ['실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '21~26년 월평균', '차이 (실시간 - 과거)']
         sort_c3_1, sort_c3_2 = st.columns(2)
         with sort_c3_1:
             sort_col_t3 = st.selectbox("⬇️ 표 정렬 기준 열", t3_num_cols, index=0, key="t3_sort_col")
@@ -322,7 +369,24 @@ with tab3:
 
         for col in t3_num_cols:
             merged_df[col] = pd.to_numeric(merged_df[col], errors='coerce').fillna(0).round(0).apply(lambda x: f"{x:,.0f}")
-        st.dataframe(merged_df, use_container_width=True, hide_index=True)
+
+        # [핵심 변경] 세부구분, 품목, 부위, 국가별 열을 인덱스로 변환하여 스크롤 시 왼쪽에 틀 고정되도록 함
+        freeze_cols_t3 = [c for c in ['세부구분', '품목', '부위', '국가별'] if c in merged_df.columns]
+        merged_df_indexed = merged_df.set_index(freeze_cols_t3)
+        
+        # 화면에 보여줄 데이터프레임 (계산용 내부 변수 _exceed 삭제)
+        display_df_t3 = merged_df_indexed.drop(columns=['_exceed'])
+
+        # [버그 수정 & 스타일] 스타일을 전체 데이터프레임 단위로 안전하게 적용하여 빨간색 경고가 무조건 작동하게 고침
+        def get_t3_styles(df_to_style):
+            style_df = pd.DataFrame('', index=df_to_style.index, columns=df_to_style.columns)
+            exceed_mask = merged_df_indexed['_exceed'] # 계산해둔 경고등 상태 가져오기
+            for col in style_df.columns:
+                style_df.loc[exceed_mask, col] = 'color: #D32F2F; font-weight: bold;' # 뚫을 것 같으면 빨간색 강조
+            return style_df
+
+        final_styled_t3 = display_df_t3.style.apply(get_t3_styles, axis=None)
+        st.dataframe(final_styled_t3, use_container_width=True) # hide_index=True를 제거하여 고정된 인덱스가 보이게 함
     else:
         st.warning("실시간 검역 데이터가 존재하지 않습니다.")
 
