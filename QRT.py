@@ -263,10 +263,9 @@ with tab2:
             comp_pivot_numeric['_temp_sort'] = pd.to_numeric(comp_pivot_numeric[sort_col_t2].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
             comp_pivot_numeric = comp_pivot_numeric.sort_values('_temp_sort', ascending=is_ascending_t2).drop(columns=['_temp_sort'])
         
-        # [핵심] 쪼개진 4개의 분류 열을 하나의 명확한 열로 병합하여 '고정(틀 고정)' 시킵니다. (데이터 증발 버그 해결!)
-        freeze_cols_t2 = [c for c in ['세부구분', '품목', '부위', '국가별'] if c in comp_pivot_numeric.columns]
-        comp_pivot_numeric['▶ 기준 (구분 | 품목 | 부위 | 국가)'] = comp_pivot_numeric[freeze_cols_t2].apply(lambda x: '  |  '.join(x.astype(str)), axis=1)
-        comp_pivot_numeric = comp_pivot_numeric.drop(columns=freeze_cols_t2).set_index('▶ 기준 (구분 | 품목 | 부위 | 국가)')
+        # [핵심 변경] 공간 확보를 위해 오직 '품목'만 인덱스(틀 고정)로 설정합니다!
+        if '품목' in comp_pivot_numeric.columns:
+            comp_pivot_numeric = comp_pivot_numeric.set_index('품목')
 
         final_styled_df = comp_pivot_numeric.style.apply(color_cells, axis=1)
         st.dataframe(final_styled_df, use_container_width=True) 
@@ -371,16 +370,18 @@ with tab3:
         for col in t3_num_cols:
             merged_df[col] = pd.to_numeric(merged_df[col], errors='coerce').fillna(0).round(0).apply(lambda x: f"{x:,.0f}")
 
-        # [핵심] 탭 3 역시 분류 열을 하나로 합쳐 틀 고정 시킵니다.
-        freeze_cols_t3 = [c for c in ['세부구분', '품목', '부위', '국가별'] if c in merged_df.columns]
-        merged_df['▶ 기준 (구분 | 품목 | 부위 | 국가)'] = merged_df[freeze_cols_t3].apply(lambda x: '  |  '.join(x.astype(str)), axis=1)
-        merged_df_indexed = merged_df.drop(columns=freeze_cols_t3).set_index('▶ 기준 (구분 | 품목 | 부위 | 국가)')
-        
+        # [핵심 변경] 공간 확보를 위해 오직 '품목'만 인덱스(틀 고정)로 설정합니다!
+        if '품목' in merged_df.columns:
+            merged_df_indexed = merged_df.set_index('품목')
+        else:
+            merged_df_indexed = merged_df.copy()
+            
         display_df_t3 = merged_df_indexed.drop(columns=['_exceed'])
 
         def get_t3_styles(df_to_style):
             style_df = pd.DataFrame('', index=df_to_style.index, columns=df_to_style.columns)
-            exceed_mask = merged_df_indexed['_exceed'] 
+            # 중복 데이터 에러를 완벽 방지하는 안전 코드 (.values 활용)
+            exceed_mask = merged_df_indexed['_exceed'].values 
             for col in style_df.columns:
                 style_df.loc[exceed_mask, col] = 'color: #D32F2F; font-weight: bold;' 
             return style_df
