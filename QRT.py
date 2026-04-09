@@ -154,9 +154,16 @@ with tab2:
 
     sorted_ym = sorted(df['연월'].unique())
     col3, col4, col5 = st.columns(3)
-    with col3: start_month_a = st.selectbox("시작월 (A) 선택", sorted_ym, index=0, key="t2_base")
-    default_b_idx = len(sorted_ym) - 2 if len(sorted_ym) > 1 else 0
+    
+    try:
+        default_a_idx = sorted_ym.index('2025-01')
+    except ValueError:
+        default_a_idx = 0
+    with col3: start_month_a = st.selectbox("시작월 (A) 선택", sorted_ym, index=default_a_idx, key="t2_base")
+    
+    default_b_idx = len(sorted_ym) - 1 if len(sorted_ym) > 0 else 0
     with col4: end_month_b = st.selectbox("마지막월 (B) 선택", sorted_ym, index=default_b_idx, key="t2_target")
+    
     default_c_idx = len(sorted_ym) - 1 if len(sorted_ym) > 0 else 0
     with col5: target_month_c = st.selectbox("비교월 선택", sorted_ym, index=default_c_idx, key="t2_target_c")
 
@@ -263,9 +270,11 @@ with tab2:
             comp_pivot_numeric['_temp_sort'] = pd.to_numeric(comp_pivot_numeric[sort_col_t2].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
             comp_pivot_numeric = comp_pivot_numeric.sort_values('_temp_sort', ascending=is_ascending_t2).drop(columns=['_temp_sort'])
         
-        # 고정 없이 안전하게 출력 (KeyError 완벽 방지)
+        if '품목' in comp_pivot_numeric.columns:
+            comp_pivot_numeric = comp_pivot_numeric.set_index('품목')
+
         final_styled_df = comp_pivot_numeric.style.apply(color_cells, axis=1)
-        st.dataframe(final_styled_df, use_container_width=True, hide_index=True) 
+        st.dataframe(final_styled_df, use_container_width=True) 
     else:
         st.warning("데이터가 없습니다.")
 
@@ -290,22 +299,22 @@ with tab3:
 
     f_raw, f_hist = df_raw.copy(), df[df['연월'] == comp_hist_month].copy()
     
-    f_hist_avg = df[df['연'].astype(str).str[:4].isin(['2021', '2022', '2023', '2024', '2025', '2026'])].copy()
+    f_hist_25 = df[df['연'].astype(str).str[:4] == '2025'].copy()
 
     if sel_cat_t3 != '전체': 
         f_raw = f_raw[f_raw['세부구분'] == sel_cat_t3]
         f_hist = f_hist[f_hist['세부구분'] == sel_cat_t3]
-        f_hist_avg = f_hist_avg[f_hist_avg['세부구분'] == sel_cat_t3]
+        f_hist_25 = f_hist_25[f_hist_25['세부구분'] == sel_cat_t3]
         
     if sel_item_t3 != '전체': 
         f_raw = f_raw[f_raw['품목'] == sel_item_t3]
         f_hist = f_hist[f_hist['품목'] == sel_item_t3]
-        f_hist_avg = f_hist_avg[f_hist_avg['품목'] == sel_item_t3]
+        f_hist_25 = f_hist_25[f_hist_25['품목'] == sel_item_t3]
         
     if sel_country_t3 not in ['전체(개별)', '전국가 합계']: 
         f_raw = f_raw[f_raw['국가별'] == sel_country_t3]
         f_hist = f_hist[f_hist['국가별'] == sel_country_t3]
-        f_hist_avg = f_hist_avg[f_hist_avg['국가별'] == sel_country_t3]
+        f_hist_25 = f_hist_25[f_hist_25['국가별'] == sel_country_t3]
 
     if '부위' in df_raw.columns:
         parts_to_filter_t3 = []
@@ -315,13 +324,13 @@ with tab3:
         if parts_to_filter_t3:
             f_raw = f_raw[f_raw['부위'].isin(parts_to_filter_t3)].copy()
             f_hist = f_hist[f_hist['부위'].isin(parts_to_filter_t3)].copy()
-            f_hist_avg = f_hist_avg[f_hist_avg['부위'].isin(parts_to_filter_t3)].copy()
+            f_hist_25 = f_hist_25[f_hist_25['부위'].isin(parts_to_filter_t3)].copy()
             
             if len(parts_to_filter_t3) > 1:
                 combined_name = f"{parts_to_filter_t3[0]} + {parts_to_filter_t3[1]}"
                 f_raw['부위'] = combined_name
                 f_hist['부위'] = combined_name
-                f_hist_avg['부위'] = combined_name
+                f_hist_25['부위'] = combined_name
 
     if not f_raw.empty:
         if sel_country_t3 == "전국가 합계":
@@ -332,15 +341,15 @@ with tab3:
         raw_grp = f_raw.groupby(merge_on)['당월누계(Ton)'].sum().reset_index().rename(columns={'당월누계(Ton)': '실시간 당월 (Ton)'})
         hist_grp = f_hist.groupby(merge_on)['검역량'].sum().reset_index().rename(columns={'검역량': f'과거 {comp_hist_month} (Ton)'})
         
-        avg_monthly = f_hist_avg.groupby(merge_on + ['연월'])['검역량'].sum().reset_index()
-        avg_grp = avg_monthly.groupby(merge_on)['검역량'].mean().reset_index().rename(columns={'검역량': '21~26년 월평균'})
+        avg_monthly = f_hist_25.groupby(merge_on + ['연월'])['검역량'].sum().reset_index()
+        avg_grp = avg_monthly.groupby(merge_on)['검역량'].mean().reset_index().rename(columns={'검역량': '25년 월평균'})
         
         merged_df = pd.merge(raw_grp, hist_grp, on=merge_on, how='outer').fillna(0)
         merged_df = pd.merge(merged_df, avg_grp, on=merge_on, how='left').fillna(0)
         
         if sel_country_t3 == "전국가 합계":
             merged_df['국가별'] = '전국가 합계'
-            cols_order = merge_on + ['국가별', '실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '21~26년 월평균']
+            cols_order = merge_on + ['국가별', '실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '25년 월평균']
             merged_df = merged_df[cols_order]
 
         merged_df['차이 (실시간 - 과거)'] = merged_df['실시간 당월 (Ton)'] - merged_df[f'과거 {comp_hist_month} (Ton)']
@@ -350,11 +359,18 @@ with tab3:
         total_days = calendar.monthrange(today.year, today.month)[1]
         pacing_multiplier = total_days / cur_day if cur_day > 0 else 1
         
-        merged_df['_exceed'] = (merged_df['실시간 당월 (Ton)'] * pacing_multiplier) > merged_df[f'과거 {comp_hist_month} (Ton)']
-        merged_df.loc[merged_df['실시간 당월 (Ton)'] == 0, '_exceed'] = False 
+        def determine_status(row):
+            if row['실시간 당월 (Ton)'] == 0: return 0
+            projected = row['실시간 당월 (Ton)'] * pacing_multiplier
+            past = row[f'과거 {comp_hist_month} (Ton)']
+            if projected > past: return 1
+            elif projected < past: return -1
+            return 0
+
+        merged_df['_pacing_status'] = merged_df.apply(determine_status, axis=1)
 
         st.markdown("---")
-        t3_num_cols = ['실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '21~26년 월평균', '차이 (실시간 - 과거)']
+        t3_num_cols = ['실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '25년 월평균', '차이 (실시간 - 과거)']
         sort_c3_1, sort_c3_2 = st.columns(2)
         with sort_c3_1:
             sort_col_t3 = st.selectbox("⬇️ 표 정렬 기준 열", t3_num_cols, index=0, key="t3_sort_col")
@@ -367,18 +383,26 @@ with tab3:
         for col in t3_num_cols:
             merged_df[col] = pd.to_numeric(merged_df[col], errors='coerce').fillna(0).round(0).apply(lambda x: f"{x:,.0f}")
 
-        # 고정 없이 안전하게 출력 (KeyError 완벽 방지)
-        display_df_t3 = merged_df.drop(columns=['_exceed'])
+        if '품목' in merged_df.columns:
+            merged_df_indexed = merged_df.set_index('품목')
+        else:
+            merged_df_indexed = merged_df.copy()
+            
+        display_df_t3 = merged_df_indexed.drop(columns=['_pacing_status'])
 
-        def get_t3_styles(df_to_style):
+        def color_t3_styles(df_to_style):
             style_df = pd.DataFrame('', index=df_to_style.index, columns=df_to_style.columns)
-            exceed_mask = merged_df['_exceed'].values 
-            for col in style_df.columns:
-                style_df.loc[exceed_mask, col] = 'color: #D32F2F; font-weight: bold;' 
+            status_series = merged_df_indexed['_pacing_status'].values
+            
+            for i, status in enumerate(status_series):
+                if status == 1: 
+                    style_df.iloc[i, :] = 'color: #D32F2F; font-weight: bold;'
+                elif status == -1: 
+                    style_df.iloc[i, :] = 'color: #1976D2; font-weight: bold;'
             return style_df
 
-        final_styled_t3 = display_df_t3.style.apply(get_t3_styles, axis=None)
-        st.dataframe(final_styled_t3, use_container_width=True, hide_index=True) 
+        final_styled_t3 = display_df_t3.style.apply(color_t3_styles, axis=None)
+        st.dataframe(final_styled_t3, use_container_width=True) 
     else:
         st.warning("실시간 검역 데이터가 존재하지 않습니다.")
 
@@ -391,15 +415,20 @@ st.markdown('<div id="offer"></div>', unsafe_allow_html=True)
 st.title("💵 오퍼가")
 
 if not df_offer.empty and '보정오퍼가' in df_offer.columns:
-    col_o1, col_o2, col_o3 = st.columns(3)
-    with col_o1: off_year = st.selectbox("연 선택", ['전체'] + sorted(df_offer['연'].unique())) if '연' in df_offer.columns else '전체'
-    with col_o2: off_month = st.selectbox("월 선택", ['전체'] + sorted(df_offer['월'].unique())) if '월' in df_offer.columns else '전체'
+    col_o1, col_o2, col_o3, col_o4 = st.columns(4)
+    
+    sorted_off_years = sorted(df_offer['연'].unique(), key=lambda x: int(x) if str(x).isdigit() else str(x)) if '연' in df_offer.columns else []
+    sorted_off_months = sorted(df_offer['월'].unique(), key=lambda x: int(x) if str(x).isdigit() else str(x)) if '월' in df_offer.columns else []
+    
+    with col_o1: off_year = st.selectbox("연 선택", ['전체'] + sorted_off_years) if '연' in df_offer.columns else '전체'
+    with col_o2: off_month = st.selectbox("월 선택", ['전체'] + sorted_off_months) if '월' in df_offer.columns else '전체'
     with col_o3: off_cat = st.selectbox("대분류 선택", ['전체'] + sorted(df_offer['대분류'].unique())) if '대분류' in df_offer.columns else '전체'
+    with col_o4: off_item = st.selectbox("품목명 선택", ['전체'] + sorted(df_offer['품목명'].unique())) if '품목명' in df_offer.columns else '전체'
         
-    col_o4, col_o5, col_o6 = st.columns(3)
-    with col_o4: off_origin = st.selectbox("원산지 선택", ['전체'] + sorted(df_offer['원산지'].unique())) if '원산지' in df_offer.columns else '전체'
-    with col_o5: off_item = st.selectbox("품목명 선택", ['전체'] + sorted(df_offer['품목명'].unique())) if '품목명' in df_offer.columns else '전체'
-    with col_o6: off_grade = st.selectbox("등급 선택", ['전체'] + sorted(df_offer['등급'].unique())) if '등급' in df_offer.columns else '전체'
+    col_o5, col_o6, col_o7 = st.columns(3)
+    with col_o5: off_origin = st.selectbox("원산지 선택", ['전체'] + sorted(df_offer['원산지'].unique())) if '원산지' in df_offer.columns else '전체'
+    with col_o6: off_brand = st.selectbox("브랜드 선택", ['전체'] + sorted(df_offer['브랜드'].unique())) if '브랜드' in df_offer.columns else '전체'
+    with col_o7: off_grade = st.selectbox("등급 선택", ['전체'] + sorted(df_offer['등급'].unique())) if '등급' in df_offer.columns else '전체'
 
     filtered_offer = df_offer.copy()
     if off_year != '전체' and '연' in filtered_offer.columns: filtered_offer = filtered_offer[filtered_offer['연'] == off_year]
@@ -407,6 +436,7 @@ if not df_offer.empty and '보정오퍼가' in df_offer.columns:
     if off_cat != '전체' and '대분류' in filtered_offer.columns: filtered_offer = filtered_offer[filtered_offer['대분류'] == off_cat]
     if off_origin != '전체' and '원산지' in filtered_offer.columns: filtered_offer = filtered_offer[filtered_offer['원산지'] == off_origin]
     if off_item != '전체' and '품목명' in filtered_offer.columns: filtered_offer = filtered_offer[filtered_offer['품목명'] == off_item]
+    if off_brand != '전체' and '브랜드' in filtered_offer.columns: filtered_offer = filtered_offer[filtered_offer['브랜드'] == off_brand]
     if off_grade != '전체' and '등급' in filtered_offer.columns: filtered_offer = filtered_offer[filtered_offer['등급'] == off_grade]
 
     target_cols = ['대분류', '연', '월', '원산지', '품목명', '브랜드', 'EST', '등급']
