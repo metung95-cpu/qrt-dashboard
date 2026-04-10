@@ -30,7 +30,6 @@ def get_gspread_client():
         credentials = Credentials.from_service_account_file('key.json', scopes=scope)
     return gspread.authorize(credentials)
 
-
 # --- 1. 과거 데이터(Qrt) 불러오기 ---
 @st.cache_data(ttl=7200)
 def load_data():
@@ -155,12 +154,14 @@ with tab2:
     sorted_ym = sorted(df['연월'].unique())
     col3, col4, col5 = st.columns(3)
     
+    # 시작월 25년 1월 고정
     try:
         default_a_idx = sorted_ym.index('2025-01')
     except ValueError:
         default_a_idx = 0
     with col3: start_month_a = st.selectbox("시작월 (A) 선택", sorted_ym, index=default_a_idx, key="t2_base")
     
+    # 마지막월 데이터 최종월 고정
     default_b_idx = len(sorted_ym) - 1 if len(sorted_ym) > 0 else 0
     with col4: end_month_b = st.selectbox("마지막월 (B) 선택", sorted_ym, index=default_b_idx, key="t2_target")
     
@@ -226,34 +227,49 @@ with tab2:
         for col in final_cols:
             comp_pivot[col] = pd.to_numeric(comp_pivot[col], errors='coerce').fillna(0).round(0).apply(lambda x: f"{x:,.0f}")
 
-        def color_cells(row):
-            styles = []
-            for col_name in row.index:
+        # [핵심 로직 1] 월별 데이터 최고(파랑)/최저(빨강) 안전한 셀 색상 적용
+        def color_tab2_cells(row):
+            styles = [''] * len(row)
+            
+            # 행 단위로 문자열을 벗겨내고 숫자값만 추출해 리스트 생성
+            month_vals = []
+            for col in range_months:
+                if col in row.index:
+                    try:
+                        month_vals.append(float(str(row[col]).replace(',', '')))
+                    except ValueError:
+                        pass
+            
+            r_max = max(month_vals) if month_vals else None
+            r_min = min(month_vals) if month_vals else None
+
+            # 각 셀을 돌면서 스타일 입히기
+            for i, col_name in enumerate(row.index):
                 col_str = str(col_name)
-                
                 try:
                     val = float(str(row[col_name]).replace(',', ''))
-                except:
+                except ValueError:
                     val = 0.0
 
-                if '합계' in col_str:
-                    styles.append('background-color: #616161; color: #FFFFFF; font-weight: bold;') 
+                if col_str in range_months:
+                    if r_max is not None and val == r_max and r_max != r_min:
+                        styles[i] = 'background-color: #E3F2FD; color: #1565C0; font-weight: bold;' # 파랑
+                    elif r_min is not None and val == r_min and r_max != r_min:
+                        styles[i] = 'background-color: #FFEBEE; color: #C62828; font-weight: bold;' # 빨강
+                elif '합계' in col_str:
+                    styles[i] = 'background-color: #616161; color: #FFFFFF; font-weight: bold;' 
                 elif '평균' in col_str and '비교월' not in col_str:
-                    styles.append('background-color: #F5F5F5; color: #212121; font-weight: bold;') 
+                    styles[i] = 'background-color: #F5F5F5; color: #212121; font-weight: bold;' 
                 elif col_str in calc_cols:
                     bg_color = 'background-color: #424242;' 
                     text_color = 'color: #FFFFFF;' 
-                    
                     if col_str == '비교월 - 직전월':
                         if val > 0: text_color = 'color: #81D4FA;' 
                         elif val < 0: text_color = 'color: #EF9A9A;' 
                     elif col_str in ['올해평균 - 비교월', '작년평균 - 비교월', '작년동월 - 비교월']:
                         if val < 0: text_color = 'color: #81D4FA;' 
                         elif val > 0: text_color = 'color: #EF9A9A;' 
-                    
-                    styles.append(f'{bg_color} {text_color} font-weight: bold;')
-                else:
-                    styles.append('')
+                    styles[i] = f'{bg_color} {text_color} font-weight: bold;'
             return styles
             
         st.markdown("---")
@@ -270,8 +286,7 @@ with tab2:
             comp_pivot_numeric['_temp_sort'] = pd.to_numeric(comp_pivot_numeric[sort_col_t2].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
             comp_pivot_numeric = comp_pivot_numeric.sort_values('_temp_sort', ascending=is_ascending_t2).drop(columns=['_temp_sort'])
         
-        # [복구] index 설정 부분(에러 원인) 삭제!
-        final_styled_df = comp_pivot_numeric.style.apply(color_cells, axis=1)
+        final_styled_df = comp_pivot_numeric.style.apply(color_tab2_cells, axis=1)
         st.dataframe(final_styled_df, use_container_width=True, hide_index=True) 
     else:
         st.warning("데이터가 없습니다.")
@@ -371,27 +386,35 @@ with tab3:
         t3_num_cols = ['실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '25년 월평균', '차이 (실시간 - 과거)']
         sort_c3_1, sort_c3_2 = st.columns(2)
         with sort_c3_1:
-            sort_col_t3 = st.selectbox("⬇️ 표 정렬 기준 열", t3_num_cols, index=0, key="t3_sort_col")
+            sort_col_t3 = st.selectbox("⬇️ 표 정렬 기준 열", t3_num_cols + ["색상 정렬"], index=0, key="t3_sort_col")
         with sort_c3_2:
-            sort_ord_t3 = st.radio("정렬 방식", ["내림차순 (큰 수부터)", "오름차순 (작은 수부터)"], horizontal=True, key="t3_sort_ord")
+            # [핵심 로직 2] 파란색/빨간색 정렬 옵션 부활
+            sort_ord_t3 = st.radio("정렬 방식", ["내림차순 (큰 수부터)", "오름차순 (작은 수부터)", "파란색 글자순 (미달 예상)", "빨간색 글자순 (초과 예상)"], horizontal=True, key="t3_sort_ord")
 
-        is_ascending_t3 = True if "오름차순" in sort_ord_t3 else False
-        merged_df = merged_df.sort_values(sort_col_t3, ascending=is_ascending_t3)
+        # Pacing 예측 기반 정렬 처리
+        if sort_ord_t3 == "파란색 글자순 (미달 예상)":
+            merged_df = merged_df.sort_values('_pacing_status', ascending=True) # -1(파랑), 0, 1(빨강) 순서
+        elif sort_ord_t3 == "빨간색 글자순 (초과 예상)":
+            merged_df = merged_df.sort_values('_pacing_status', ascending=False) # 1(빨강), 0, -1(파랑) 순서
+        else:
+            is_ascending_t3 = True if "오름차순" in sort_ord_t3 else False
+            if sort_col_t3 != "색상 정렬":
+                merged_df['_temp_sort'] = pd.to_numeric(merged_df[sort_col_t3].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                merged_df = merged_df.sort_values('_temp_sort', ascending=is_ascending_t3).drop(columns=['_temp_sort'])
 
         for col in t3_num_cols:
             merged_df[col] = pd.to_numeric(merged_df[col], errors='coerce').fillna(0).round(0).apply(lambda x: f"{x:,.0f}")
 
-        # [복구] index 설정 부분(에러 원인) 삭제!
+        # 렌더링용 데이터프레임 (상태 컬럼 숨기기)
         display_df_t3 = merged_df.drop(columns=['_pacing_status'])
 
         def color_t3_styles(df_to_style):
             style_df = pd.DataFrame('', index=df_to_style.index, columns=df_to_style.columns)
-            status_series = merged_df['_pacing_status'].values
-            
-            for i, status in enumerate(status_series):
-                if status == 1: 
+            status_array = merged_df['_pacing_status'].values
+            for i in range(len(df_to_style)):
+                if status_array[i] == 1: 
                     style_df.iloc[i, :] = 'color: #D32F2F; font-weight: bold;'
-                elif status == -1: 
+                elif status_array[i] == -1: 
                     style_df.iloc[i, :] = 'color: #1976D2; font-weight: bold;'
             return style_df
 
@@ -411,8 +434,13 @@ st.title("💵 오퍼가")
 if not df_offer.empty and '보정오퍼가' in df_offer.columns:
     col_o1, col_o2, col_o3, col_o4 = st.columns(4)
     
-    sorted_off_years = sorted(df_offer['연'].unique(), key=lambda x: int(x) if str(x).isdigit() else str(x)) if '연' in df_offer.columns else []
-    sorted_off_months = sorted(df_offer['월'].unique(), key=lambda x: int(x) if str(x).isdigit() else str(x)) if '월' in df_offer.columns else []
+    # [핵심 로직 3] 오퍼가 1~12월 꼬임 없는 숫자 정렬 복구
+    def extract_number(val):
+        digits = ''.join(filter(str.isdigit, str(val)))
+        return int(digits) if digits else 0
+
+    sorted_off_years = sorted(df_offer['연'].unique(), key=extract_number) if '연' in df_offer.columns else []
+    sorted_off_months = sorted(df_offer['월'].unique(), key=extract_number) if '월' in df_offer.columns else []
     
     with col_o1: off_year = st.selectbox("연 선택", ['전체'] + sorted_off_years) if '연' in df_offer.columns else '전체'
     with col_o2: off_month = st.selectbox("월 선택", ['전체'] + sorted_off_months) if '월' in df_offer.columns else '전체'
@@ -425,13 +453,13 @@ if not df_offer.empty and '보정오퍼가' in df_offer.columns:
     with col_o7: off_grade = st.selectbox("등급 선택", ['전체'] + sorted(df_offer['등급'].unique())) if '등급' in df_offer.columns else '전체'
 
     filtered_offer = df_offer.copy()
-    if off_year != '전체' and '연' in filtered_offer.columns: filtered_offer = filtered_offer[filtered_offer['연'] == off_year]
-    if off_month != '전체' and '월' in filtered_offer.columns: filtered_offer = filtered_offer[filtered_offer['월'] == off_month]
-    if off_cat != '전체' and '대분류' in filtered_offer.columns: filtered_offer = filtered_offer[filtered_offer['대분류'] == off_cat]
-    if off_origin != '전체' and '원산지' in filtered_offer.columns: filtered_offer = filtered_offer[filtered_offer['원산지'] == off_origin]
-    if off_item != '전체' and '품목명' in filtered_offer.columns: filtered_offer = filtered_offer[filtered_offer['품목명'] == off_item]
-    if off_brand != '전체' and '브랜드' in filtered_offer.columns: filtered_offer = filtered_offer[filtered_offer['브랜드'] == off_brand]
-    if off_grade != '전체' and '등급' in filtered_offer.columns: filtered_offer = filtered_offer[filtered_offer['등급'] == off_grade]
+    if off_year != '전체': filtered_offer = filtered_offer[filtered_offer['연'] == off_year]
+    if off_month != '전체': filtered_offer = filtered_offer[filtered_offer['월'] == off_month]
+    if off_cat != '전체': filtered_offer = filtered_offer[filtered_offer['대분류'] == off_cat]
+    if off_origin != '전체': filtered_offer = filtered_offer[filtered_offer['원산지'] == off_origin]
+    if off_item != '전체': filtered_offer = filtered_offer[filtered_offer['품목명'] == off_item]
+    if off_brand != '전체': filtered_offer = filtered_offer[filtered_offer['브랜드'] == off_brand]
+    if off_grade != '전체': filtered_offer = filtered_offer[filtered_offer['등급'] == off_grade]
 
     target_cols = ['대분류', '연', '월', '원산지', '품목명', '브랜드', 'EST', '등급']
     idx_cols = [c for c in target_cols if c in filtered_offer.columns]
