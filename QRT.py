@@ -227,7 +227,7 @@ with tab2:
         for col in final_cols:
             comp_pivot[col] = pd.to_numeric(comp_pivot[col], errors='coerce').fillna(0).round(0).apply(lambda x: f"{x:,.0f}")
 
-        # [핵심 로직 1] 월별 데이터 최고(파랑)/최저(빨강) 안전한 셀 색상 적용
+        # [핵심 수정 로직] 월별 데이터 최고(파랑) / 0을 제외한 최저(빨강) 색상 적용
         def color_tab2_cells(row):
             styles = [''] * len(row)
             
@@ -240,8 +240,12 @@ with tab2:
                     except ValueError:
                         pass
             
+            # 1. 0을 포함한 전체에서의 최대값
             r_max = max(month_vals) if month_vals else None
-            r_min = min(month_vals) if month_vals else None
+            
+            # 2. 0을 제외한 값들 중에서 최소값 찾기 (0은 최저값으로 잡지 않음)
+            non_zero_vals = [v for v in month_vals if v > 0]
+            r_min = min(non_zero_vals) if non_zero_vals else None
 
             # 각 셀을 돌면서 스타일 입히기
             for i, col_name in enumerate(row.index):
@@ -252,7 +256,8 @@ with tab2:
                     val = 0.0
 
                 if col_str in range_months:
-                    if r_max is not None and val == r_max and r_max != r_min:
+                    # 0은 파란색이나 빨간색으로 칠하지 않도록 val > 0 조건 추가
+                    if r_max is not None and val == r_max and val > 0 and r_max != r_min:
                         styles[i] = 'background-color: #E3F2FD; color: #1565C0; font-weight: bold;' # 파랑
                     elif r_min is not None and val == r_min and r_max != r_min:
                         styles[i] = 'background-color: #FFEBEE; color: #C62828; font-weight: bold;' # 빨강
@@ -388,7 +393,6 @@ with tab3:
         with sort_c3_1:
             sort_col_t3 = st.selectbox("⬇️ 표 정렬 기준 열", t3_num_cols + ["색상 정렬"], index=0, key="t3_sort_col")
         with sort_c3_2:
-            # [핵심 로직 2] 파란색/빨간색 정렬 옵션 부활
             sort_ord_t3 = st.radio("정렬 방식", ["내림차순 (큰 수부터)", "오름차순 (작은 수부터)", "파란색 글자순 (미달 예상)", "빨간색 글자순 (초과 예상)"], horizontal=True, key="t3_sort_ord")
 
         # Pacing 예측 기반 정렬 처리
@@ -434,7 +438,6 @@ st.title("💵 오퍼가")
 if not df_offer.empty and '보정오퍼가' in df_offer.columns:
     col_o1, col_o2, col_o3, col_o4 = st.columns(4)
     
-    # [핵심 로직 3] 오퍼가 1~12월 꼬임 없는 숫자 정렬 복구
     def extract_number(val):
         digits = ''.join(filter(str.isdigit, str(val)))
         return int(digits) if digits else 0
