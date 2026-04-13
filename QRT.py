@@ -227,11 +227,9 @@ with tab2:
         for col in final_cols:
             comp_pivot[col] = pd.to_numeric(comp_pivot[col], errors='coerce').fillna(0).round(0).apply(lambda x: f"{x:,.0f}")
 
-        # [핵심 수정 로직] 월별 데이터 최고(파랑) / 0을 제외한 최저(빨강) 색상 적용
         def color_tab2_cells(row):
             styles = [''] * len(row)
             
-            # 행 단위로 문자열을 벗겨내고 숫자값만 추출해 리스트 생성
             month_vals = []
             for col in range_months:
                 if col in row.index:
@@ -240,14 +238,10 @@ with tab2:
                     except ValueError:
                         pass
             
-            # 1. 0을 포함한 전체에서의 최대값
             r_max = max(month_vals) if month_vals else None
-            
-            # 2. 0을 제외한 값들 중에서 최소값 찾기 (0은 최저값으로 잡지 않음)
             non_zero_vals = [v for v in month_vals if v > 0]
             r_min = min(non_zero_vals) if non_zero_vals else None
 
-            # 각 셀을 돌면서 스타일 입히기
             for i, col_name in enumerate(row.index):
                 col_str = str(col_name)
                 try:
@@ -256,11 +250,10 @@ with tab2:
                     val = 0.0
 
                 if col_str in range_months:
-                    # 0은 파란색이나 빨간색으로 칠하지 않도록 val > 0 조건 추가
                     if r_max is not None and val == r_max and val > 0 and r_max != r_min:
-                        styles[i] = 'background-color: #E3F2FD; color: #1565C0; font-weight: bold;' # 파랑
+                        styles[i] = 'background-color: #E3F2FD; color: #1565C0; font-weight: bold;' 
                     elif r_min is not None and val == r_min and r_max != r_min:
-                        styles[i] = 'background-color: #FFEBEE; color: #C62828; font-weight: bold;' # 빨강
+                        styles[i] = 'background-color: #FFEBEE; color: #C62828; font-weight: bold;' 
                 elif '합계' in col_str:
                     styles[i] = 'background-color: #616161; color: #FFFFFF; font-weight: bold;' 
                 elif '평균' in col_str and '비교월' not in col_str:
@@ -370,60 +363,65 @@ with tab3:
             cols_order = merge_on + ['국가별', '실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '25년 월평균']
             merged_df = merged_df[cols_order]
 
-        merged_df['차이 (실시간 - 과거)'] = merged_df['실시간 당월 (Ton)'] - merged_df[f'과거 {comp_hist_month} (Ton)']
-        
-        today = datetime.now()
-        cur_day = today.day
-        total_days = calendar.monthrange(today.year, today.month)[1]
-        pacing_multiplier = total_days / cur_day if cur_day > 0 else 1
-        
-        def determine_status(row):
-            if row['실시간 당월 (Ton)'] == 0: return 0
-            projected = row['실시간 당월 (Ton)'] * pacing_multiplier
-            past = row[f'과거 {comp_hist_month} (Ton)']
-            if projected > past: return 1
-            elif projected < past: return -1
-            return 0
+        # 💡 [핵심 추가] 과거 실적이 0인 데이터는 표에서 완전히 제외합니다.
+        merged_df = merged_df[merged_df[f'과거 {comp_hist_month} (Ton)'] > 0]
 
-        merged_df['_pacing_status'] = merged_df.apply(determine_status, axis=1)
+        if not merged_df.empty:
+            merged_df['차이 (실시간 - 과거)'] = merged_df['실시간 당월 (Ton)'] - merged_df[f'과거 {comp_hist_month} (Ton)']
+            
+            today = datetime.now()
+            cur_day = today.day
+            total_days = calendar.monthrange(today.year, today.month)[1]
+            pacing_multiplier = total_days / cur_day if cur_day > 0 else 1
+            
+            def determine_status(row):
+                if row['실시간 당월 (Ton)'] == 0: return 0
+                projected = row['실시간 당월 (Ton)'] * pacing_multiplier
+                past = row[f'과거 {comp_hist_month} (Ton)']
+                if projected > past: return 1
+                elif projected < past: return -1
+                return 0
 
-        st.markdown("---")
-        t3_num_cols = ['실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '25년 월평균', '차이 (실시간 - 과거)']
-        sort_c3_1, sort_c3_2 = st.columns(2)
-        with sort_c3_1:
-            sort_col_t3 = st.selectbox("⬇️ 표 정렬 기준 열", t3_num_cols + ["색상 정렬"], index=0, key="t3_sort_col")
-        with sort_c3_2:
-            sort_ord_t3 = st.radio("정렬 방식", ["내림차순 (큰 수부터)", "오름차순 (작은 수부터)", "파란색 글자순 (미달 예상)", "빨간색 글자순 (초과 예상)"], horizontal=True, key="t3_sort_ord")
+            merged_df['_pacing_status'] = merged_df.apply(determine_status, axis=1)
 
-        # Pacing 예측 기반 정렬 처리
-        if sort_ord_t3 == "파란색 글자순 (미달 예상)":
-            merged_df = merged_df.sort_values('_pacing_status', ascending=True) # -1(파랑), 0, 1(빨강) 순서
-        elif sort_ord_t3 == "빨간색 글자순 (초과 예상)":
-            merged_df = merged_df.sort_values('_pacing_status', ascending=False) # 1(빨강), 0, -1(파랑) 순서
+            st.markdown("---")
+            t3_num_cols = ['실시간 당월 (Ton)', f'과거 {comp_hist_month} (Ton)', '25년 월평균', '차이 (실시간 - 과거)']
+            sort_c3_1, sort_c3_2 = st.columns(2)
+            with sort_c3_1:
+                sort_col_t3 = st.selectbox("⬇️ 표 정렬 기준 열", t3_num_cols + ["색상 정렬"], index=0, key="t3_sort_col")
+            with sort_c3_2:
+                sort_ord_t3 = st.radio("정렬 방식", ["내림차순 (큰 수부터)", "오름차순 (작은 수부터)", "파란색 글자순 (미달 예상)", "빨간색 글자순 (초과 예상)"], horizontal=True, key="t3_sort_ord")
+
+            # Pacing 예측 기반 정렬 처리
+            if sort_ord_t3 == "파란색 글자순 (미달 예상)":
+                merged_df = merged_df.sort_values('_pacing_status', ascending=True) # -1(파랑), 0, 1(빨강) 순서
+            elif sort_ord_t3 == "빨간색 글자순 (초과 예상)":
+                merged_df = merged_df.sort_values('_pacing_status', ascending=False) # 1(빨강), 0, -1(파랑) 순서
+            else:
+                is_ascending_t3 = True if "오름차순" in sort_ord_t3 else False
+                if sort_col_t3 != "색상 정렬":
+                    merged_df['_temp_sort'] = pd.to_numeric(merged_df[sort_col_t3].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+                    merged_df = merged_df.sort_values('_temp_sort', ascending=is_ascending_t3).drop(columns=['_temp_sort'])
+
+            for col in t3_num_cols:
+                merged_df[col] = pd.to_numeric(merged_df[col], errors='coerce').fillna(0).round(0).apply(lambda x: f"{x:,.0f}")
+
+            display_df_t3 = merged_df.drop(columns=['_pacing_status'])
+
+            def color_t3_styles(df_to_style):
+                style_df = pd.DataFrame('', index=df_to_style.index, columns=df_to_style.columns)
+                status_array = merged_df['_pacing_status'].values
+                for i in range(len(df_to_style)):
+                    if status_array[i] == 1: 
+                        style_df.iloc[i, :] = 'color: #D32F2F; font-weight: bold;'
+                    elif status_array[i] == -1: 
+                        style_df.iloc[i, :] = 'color: #1976D2; font-weight: bold;'
+                return style_df
+
+            final_styled_t3 = display_df_t3.style.apply(color_t3_styles, axis=None)
+            st.dataframe(final_styled_t3, use_container_width=True, hide_index=True) 
         else:
-            is_ascending_t3 = True if "오름차순" in sort_ord_t3 else False
-            if sort_col_t3 != "색상 정렬":
-                merged_df['_temp_sort'] = pd.to_numeric(merged_df[sort_col_t3].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-                merged_df = merged_df.sort_values('_temp_sort', ascending=is_ascending_t3).drop(columns=['_temp_sort'])
-
-        for col in t3_num_cols:
-            merged_df[col] = pd.to_numeric(merged_df[col], errors='coerce').fillna(0).round(0).apply(lambda x: f"{x:,.0f}")
-
-        # 렌더링용 데이터프레임 (상태 컬럼 숨기기)
-        display_df_t3 = merged_df.drop(columns=['_pacing_status'])
-
-        def color_t3_styles(df_to_style):
-            style_df = pd.DataFrame('', index=df_to_style.index, columns=df_to_style.columns)
-            status_array = merged_df['_pacing_status'].values
-            for i in range(len(df_to_style)):
-                if status_array[i] == 1: 
-                    style_df.iloc[i, :] = 'color: #D32F2F; font-weight: bold;'
-                elif status_array[i] == -1: 
-                    style_df.iloc[i, :] = 'color: #1976D2; font-weight: bold;'
-            return style_df
-
-        final_styled_t3 = display_df_t3.style.apply(color_t3_styles, axis=None)
-        st.dataframe(final_styled_t3, use_container_width=True, hide_index=True) 
+            st.info("비교할 과거 데이터 내역이 존재하지 않습니다. (과거 0값 필터링됨)")
     else:
         st.warning("실시간 검역 데이터가 존재하지 않습니다.")
 
