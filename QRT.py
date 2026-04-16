@@ -363,7 +363,7 @@ if not df_offer.empty and '보정오퍼가' in df_offer.columns:
 st.markdown("<br><br><br>", unsafe_allow_html=True) 
 st.markdown("---") 
 st.markdown('<div id="inventory"></div>', unsafe_allow_html=True) 
-st.title("📦 AZ광주 재고 및 발주 계획")
+st.title("📦 AZ광주 재고 판매계획")
 
 if not df_inv.empty:
     st.subheader("🔍 재고 검색 및 필터")
