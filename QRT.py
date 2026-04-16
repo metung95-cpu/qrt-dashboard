@@ -88,17 +88,21 @@ def load_inventory_data():
         df_inv.columns = df_inv.columns.str.strip()
         df_inv = df_inv.loc[:, df_inv.columns != ''] # 빈 열 제거
         
-        # 💡 [핵심] 사용자가 직접 편집할 열이 없으면 구글 시트에 자동으로 추가하도록 세팅
+        # 💡 [핵심 수정 1] 처음 만들 때부터 데이터 타입을 빡세게 고정 (TypeError 방지)
         if '판매 계획' not in df_inv.columns: df_inv['판매 계획'] = ""
         if '구매 계획' not in df_inv.columns: df_inv['구매 계획'] = ""
         
         if '적정재고' not in df_inv.columns:
             if '판매 계획' in df_inv.columns:
-                # 판매 계획 바로 왼쪽에 적정재고 열 추가
                 idx = df_inv.columns.get_loc('판매 계획')
-                df_inv.insert(idx, '적정재고', "")
+                df_inv.insert(idx, '적정재고', 0) # 빈칸("")이 아니라 숫자(0)으로 초기화
             else:
-                df_inv['적정재고'] = ""
+                df_inv['적정재고'] = 0
+                
+        # 무조건 숫자는 숫자, 문자는 문자로 형변환 쾅! 박아버리기
+        df_inv['적정재고'] = pd.to_numeric(df_inv['적정재고'].astype(str).str.replace(',', ''), errors='coerce').fillna(0).astype(int)
+        df_inv['판매 계획'] = df_inv['판매 계획'].astype(str).fillna("")
+        df_inv['구매 계획'] = df_inv['구매 계획'].astype(str).fillna("")
                 
         return df_inv
     except Exception as e:
@@ -331,7 +335,6 @@ st.markdown("<br><br><br>", unsafe_allow_html=True)
 st.markdown("---") 
 st.markdown('<div id="offer"></div>', unsafe_allow_html=True) 
 st.title("💵 오퍼가 분석")
-
 if not df_offer.empty and '보정오퍼가' in df_offer.columns:
     col_o1, col_o2, col_o3, col_o4 = st.columns(4)
     def extract_num(v):
@@ -364,11 +367,8 @@ st.title("📦 AZ광주 재고 및 발주 계획")
 
 if not df_inv.empty:
     st.subheader("🔍 재고 검색 및 필터")
-    
-    # 💡 1. 필터 및 검색 레이아웃 (오퍼/구매 필터 추가)
     col_s1, col_s2, col_s3 = st.columns(3)
     with col_s1:
-        # 품명 또는 브랜드의 '일부'만 입력해도 찾아주는 강력한 검색창
         search_query = st.text_input("🔍 품명 / 브랜드 검색 (일부 키워드 입력)", "")
     with col_s2:
         brand_col = next((c for c in df_inv.columns if '브랜드' in c or 'BRAND' in c.upper()), None)
@@ -379,7 +379,6 @@ if not df_inv.empty:
     with col_s3:
         offer_col = next((c for c in df_inv.columns if '오퍼구매' in c.replace(' ', '')), None)
         if offer_col:
-            # 빈칸을 제외하고 '구매', '오퍼' 등의 고유값만 추출
             offer_opts = [x for x in df_inv[offer_col].unique() if str(x).strip() != '']
             selected_offer = st.selectbox("🛒 오퍼/구매 필터", ['전체'] + sorted(offer_opts))
         else:
@@ -387,50 +386,37 @@ if not df_inv.empty:
 
     display_inv = df_inv.copy()
     
-    # 💡 2. 검색 조건 적용
     if search_query:
-        # 모든 열을 뒤져서 글자가 포함되어 있으면 다 뽑아냅니다. (부분 검색)
         mask = display_inv.apply(lambda row: row.astype(str).str.contains(search_query, case=False).any(), axis=1)
         display_inv = display_inv[mask]
-    
     if selected_brand != '전체' and brand_col:
         display_inv = display_inv[display_inv[brand_col] == selected_brand]
-        
     if selected_offer != '전체' and offer_col:
         display_inv = display_inv[display_inv[offer_col] == selected_offer]
 
-    # 숫자 데이터 전처리 (콤마 제거)
-    for col in ['적정재고']:
-        if col in display_inv.columns:
-            display_inv[col] = pd.to_numeric(display_inv[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-
-    # 💡 3. 편집 가능한 표(Data Editor) 설정
     st.markdown(f"**현재 조회된 항목:** {len(display_inv)}건 (표 안에서 직접 숫자를 적고 메모를 남길 수 있습니다.)")
     
-    # 내가 맘대로 편집할 수 있는 열 설정 (넓이 조절 포함)
     editor_config = {
         "적정재고": st.column_config.NumberColumn("적정재고", width="medium", format="%d"),
         "판매 계획": st.column_config.TextColumn("판매 계획 (메모)", width="large"),
         "구매 계획": st.column_config.TextColumn("구매 계획 (메모)", width="large")
     }
-    
-    # 위 3개 빼고 나머지 원본 데이터는 수정 못 하도록 잠금 (원본 훼손 방지)
     disabled_cols = [c for c in display_inv.columns if c not in ["적정재고", "판매 계획", "구매 계획"]]
 
-    # 편집기를 화면에 띄웁니다.
     edited_display = st.data_editor(
         display_inv,
         column_config=editor_config,
         disabled=disabled_cols,
         use_container_width=True,
         hide_index=True,
-        height=int((len(display_inv) + 1) * 35) + 40 # 끝까지 쫙 펼쳐지도록 설정
+        height=int((len(display_inv) + 1) * 35) + 40
     )
 
-    # 편집된 내용을 원본 데이터프레임(메모리)에 덮어씌움
-    df_inv.update(edited_display)
+    # 💡 [핵심 수정 2] .update() 대신 열별로 콕 찝어 수동으로 값 밀어넣기 (에러 완벽 차단)
+    for col in ["적정재고", "판매 계획", "구매 계획"]:
+        if col in edited_display.columns:
+            df_inv.loc[edited_display.index, col] = edited_display[col]
 
-    # 💡 4. 구글 시트로 강제 저장하는 로직
     st.markdown("---")
     col_btn, _ = st.columns([1, 3])
     with col_btn:
@@ -441,17 +427,14 @@ if not df_inv.empty:
                     doc = gc.open_by_url('https://docs.google.com/spreadsheets/d/1XTZIZQsyeTi4s82G1zdDvtsddSBpPcAXeBA9iuRd87Y/edit#gid=1809836868')
                     worksheet = doc.worksheet('총재고')
 
-                    # 엑셀에 들어갈 모양으로 다시 정리 (비어있는 값은 빈칸으로)
                     save_df = df_inv.copy()
                     save_df.fillna("", inplace=True)
                     
-                    # 시트 초기화 후 싹 다 갈아 끼우기
                     update_data = [save_df.columns.values.tolist()] + save_df.values.tolist()
                     worksheet.clear()
                     worksheet.update('A1', update_data)
                     
                     st.success("✅ 구글 시트에 성공적으로 저장되었습니다!")
-                    # 저장 후 새 데이터를 위해 임시 캐시 삭제
                     load_inventory_data.clear()
                     time.sleep(1)
                     st.rerun()
