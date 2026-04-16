@@ -5,6 +5,7 @@ from google.oauth2.service_account import Credentials
 import json 
 from datetime import datetime
 import calendar
+import time
 
 st.set_page_config(page_title="검역량 & 오퍼가 & 재고 대시보드", layout="wide")
 
@@ -73,19 +74,32 @@ def load_offer_data():
         df_offer['보정오퍼가'] = pd.to_numeric(df_offer['보정오퍼가'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
     return df_offer
 
-# --- 4. AZ광주 재고 데이터 불러오기 (신규) ---
-@st.cache_data(ttl=600)
+# --- 4. AZ광주 재고 데이터 불러오기 ---
+@st.cache_data(ttl=60) # 수정을 자주 하므로 캐시 시간을 짧게 1분으로 설정
 def load_inventory_data():
     try:
         gc = get_gspread_client()
-        # 전달해주신 시트 URL 사용
         doc = gc.open_by_url('https://docs.google.com/spreadsheets/d/1XTZIZQsyeTi4s82G1zdDvtsddSBpPcAXeBA9iuRd87Y/edit#gid=1809836868')
         worksheet = doc.worksheet('총재고')
         data = worksheet.get_all_values()
-        if not data:
-            return pd.DataFrame()
+        if not data: return pd.DataFrame()
+        
         df_inv = pd.DataFrame(data[1:], columns=data[0])
         df_inv.columns = df_inv.columns.str.strip()
+        df_inv = df_inv.loc[:, df_inv.columns != ''] # 빈 열 제거
+        
+        # 💡 [핵심] 사용자가 직접 편집할 열이 없으면 구글 시트에 자동으로 추가하도록 세팅
+        if '판매 계획' not in df_inv.columns: df_inv['판매 계획'] = ""
+        if '구매 계획' not in df_inv.columns: df_inv['구매 계획'] = ""
+        
+        if '적정재고' not in df_inv.columns:
+            if '판매 계획' in df_inv.columns:
+                # 판매 계획 바로 왼쪽에 적정재고 열 추가
+                idx = df_inv.columns.get_loc('판매 계획')
+                df_inv.insert(idx, '적정재고', "")
+            else:
+                df_inv['적정재고'] = ""
+                
         return df_inv
     except Exception as e:
         st.error(f"재고 데이터를 불러오는 중 오류 발생: {e}")
@@ -115,7 +129,6 @@ st.title("🥩 검역량 통합 대시보드")
 
 tab1, tab2, tab3 = st.tabs(["📊 조건별 통합 조회", "📈 월별 검역량 비교", "⚡ 실시간 검역 비교"])
 
-# (기존 검역량 탭 코드 - 생략 없이 그대로 유지)
 with tab1:
     st.subheader("조건별 검역량 요약표")
     sorted_years = sorted(df['연'].unique(), key=lambda x: int(x) if str(x).isdigit() else str(x))
@@ -245,7 +258,6 @@ with tab2:
 
 with tab3:
     st.subheader("⚡ 실시간 당월(Ton) vs 과거 특정월 비교")
-    # (실시간 비교 탭 코드 - 생략 없이 그대로 유지)
     sorted_ym_desc = sorted(df['연월'].unique(), reverse=True)
     comp_hist_month = st.selectbox("비교할 과거 월 선택", sorted_ym_desc, index=0, key="t3_comp_month")
     col_t3_1, col_t3_2 = st.columns(2)
@@ -319,7 +331,7 @@ st.markdown("<br><br><br>", unsafe_allow_html=True)
 st.markdown("---") 
 st.markdown('<div id="offer"></div>', unsafe_allow_html=True) 
 st.title("💵 오퍼가 분석")
-# (오퍼가 분석 코드 - 기존과 동일하게 유지)
+
 if not df_offer.empty and '보정오퍼가' in df_offer.columns:
     col_o1, col_o2, col_o3, col_o4 = st.columns(4)
     def extract_num(v):
@@ -343,59 +355,108 @@ if not df_offer.empty and '보정오퍼가' in df_offer.columns:
 
 
 # ==========================================
-# 메인 화면 3: AZ광주 재고관리 (신규 추가)
+# 메인 화면 3: AZ광주 재고관리 (양방향 편집 가능)
 # ==========================================
 st.markdown("<br><br><br>", unsafe_allow_html=True) 
 st.markdown("---") 
 st.markdown('<div id="inventory"></div>', unsafe_allow_html=True) 
-st.title("📦 AZ광주 재고관리 (총재고)")
+st.title("📦 AZ광주 재고 및 발주 계획")
 
 if not df_inv.empty:
-    # --- 검색 및 필터 ---
-    st.subheader("🔍 재고 검색")
-    col_s1, col_s2 = st.columns(2)
+    st.subheader("🔍 재고 검색 및 필터")
+    
+    # 💡 1. 필터 및 검색 레이아웃 (오퍼/구매 필터 추가)
+    col_s1, col_s2, col_s3 = st.columns(3)
     with col_s1:
-        search_query = st.text_input("품명 또는 브랜드 검색 (키워드 입력)", "")
+        # 품명 또는 브랜드의 '일부'만 입력해도 찾아주는 강력한 검색창
+        search_query = st.text_input("🔍 품명 / 브랜드 검색 (일부 키워드 입력)", "")
     with col_s2:
-        # 시트에 '브랜드' 또는 '품명' 컬럼이 있다고 가정하고 필터 구성
-        available_cols = df_inv.columns.tolist()
-        brand_col = next((c for c in available_cols if '브랜드' in c), None)
+        brand_col = next((c for c in df_inv.columns if '브랜드' in c or 'BRAND' in c.upper()), None)
         if brand_col:
-            selected_brand = st.selectbox("브랜드별 필터", ['전체'] + sorted(df_inv[brand_col].unique().tolist()))
+            selected_brand = st.selectbox("🏷️ 브랜드 필터", ['전체'] + sorted(df_inv[brand_col].astype(str).unique().tolist()))
         else:
             selected_brand = '전체'
+    with col_s3:
+        offer_col = next((c for c in df_inv.columns if '오퍼구매' in c.replace(' ', '')), None)
+        if offer_col:
+            # 빈칸을 제외하고 '구매', '오퍼' 등의 고유값만 추출
+            offer_opts = [x for x in df_inv[offer_col].unique() if str(x).strip() != '']
+            selected_offer = st.selectbox("🛒 오퍼/구매 필터", ['전체'] + sorted(offer_opts))
+        else:
+            selected_offer = '전체'
 
-    # 데이터 필터링 로직
     display_inv = df_inv.copy()
     
+    # 💡 2. 검색 조건 적용
     if search_query:
-        # 모든 컬럼에서 해당 키워드가 포함된 행을 찾음
+        # 모든 열을 뒤져서 글자가 포함되어 있으면 다 뽑아냅니다. (부분 검색)
         mask = display_inv.apply(lambda row: row.astype(str).str.contains(search_query, case=False).any(), axis=1)
         display_inv = display_inv[mask]
     
     if selected_brand != '전체' and brand_col:
         display_inv = display_inv[display_inv[brand_col] == selected_brand]
+        
+    if selected_offer != '전체' and offer_col:
+        display_inv = display_inv[display_inv[offer_col] == selected_offer]
 
-    # --- 재고 현황 표 ---
-    st.markdown(f"**현재 조회된 재고 건수:** {len(display_inv)}건")
-    
-    # 숫자형 컬럼에 대해 콤마 표시 처리 (재고수량, 박스수 등)
-    # 자동으로 시도해보고 숫자인 경우에만 변환
-    for col in display_inv.columns:
-        # 컬럼 이름에 '수량', '중량', '박스', 'BOX' 등이 들어가는 경우 숫자 변환 시도
-        if any(keyword in col for keyword in ['수량', '중량', '박스', 'BOX', '재고']):
+    # 숫자 데이터 전처리 (콤마 제거)
+    for col in ['적정재고']:
+        if col in display_inv.columns:
             display_inv[col] = pd.to_numeric(display_inv[col].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
 
-    # 표 출력
-    st.dataframe(display_inv, use_container_width=True, hide_index=True)
+    # 💡 3. 편집 가능한 표(Data Editor) 설정
+    st.markdown(f"**현재 조회된 항목:** {len(display_inv)}건 (표 안에서 직접 숫자를 적고 메모를 남길 수 있습니다.)")
     
-    # 하단 엑셀 다운로드 기능 (참고용)
-    csv = display_inv.to_csv(index=False).encode('utf-8-sig')
-    st.download_button(
-        label="📥 현재 재고 목록 다운로드 (CSV)",
-        data=csv,
-        file_name=f"AZ_광주_재고현황_{datetime.now().strftime('%Y%m%d')}.csv",
-        mime='text/csv',
+    # 내가 맘대로 편집할 수 있는 열 설정 (넓이 조절 포함)
+    editor_config = {
+        "적정재고": st.column_config.NumberColumn("적정재고", width="medium", format="%d"),
+        "판매 계획": st.column_config.TextColumn("판매 계획 (메모)", width="large"),
+        "구매 계획": st.column_config.TextColumn("구매 계획 (메모)", width="large")
+    }
+    
+    # 위 3개 빼고 나머지 원본 데이터는 수정 못 하도록 잠금 (원본 훼손 방지)
+    disabled_cols = [c for c in display_inv.columns if c not in ["적정재고", "판매 계획", "구매 계획"]]
+
+    # 편집기를 화면에 띄웁니다.
+    edited_display = st.data_editor(
+        display_inv,
+        column_config=editor_config,
+        disabled=disabled_cols,
+        use_container_width=True,
+        hide_index=True,
+        height=int((len(display_inv) + 1) * 35) + 40 # 끝까지 쫙 펼쳐지도록 설정
     )
+
+    # 편집된 내용을 원본 데이터프레임(메모리)에 덮어씌움
+    df_inv.update(edited_display)
+
+    # 💡 4. 구글 시트로 강제 저장하는 로직
+    st.markdown("---")
+    col_btn, _ = st.columns([1, 3])
+    with col_btn:
+        if st.button("💾 변경된 계획 구글 시트에 저장하기", use_container_width=True, type="primary"):
+            with st.spinner("구글 시트에 데이터를 덮어쓰는 중입니다..."):
+                try:
+                    gc = get_gspread_client()
+                    doc = gc.open_by_url('https://docs.google.com/spreadsheets/d/1XTZIZQsyeTi4s82G1zdDvtsddSBpPcAXeBA9iuRd87Y/edit#gid=1809836868')
+                    worksheet = doc.worksheet('총재고')
+
+                    # 엑셀에 들어갈 모양으로 다시 정리 (비어있는 값은 빈칸으로)
+                    save_df = df_inv.copy()
+                    save_df.fillna("", inplace=True)
+                    
+                    # 시트 초기화 후 싹 다 갈아 끼우기
+                    update_data = [save_df.columns.values.tolist()] + save_df.values.tolist()
+                    worksheet.clear()
+                    worksheet.update('A1', update_data)
+                    
+                    st.success("✅ 구글 시트에 성공적으로 저장되었습니다!")
+                    # 저장 후 새 데이터를 위해 임시 캐시 삭제
+                    load_inventory_data.clear()
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"🚨 저장 실패! 오류 메시지: {e}")
+
 else:
     st.warning("재고 데이터를 불러오지 못했습니다. 구글 시트의 권한이나 시트 이름을 확인해주세요.")
