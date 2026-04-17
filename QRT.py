@@ -35,34 +35,38 @@ def get_gspread_client():
 # --- 1. 과거 데이터(빅쿼리 Qrt_rawfinal) 불러오기 ---
 @st.cache_data(ttl=7200)
 def load_data():
-    # 1. 빅쿼리 클라이언트 생성
-    # 기존에 사용하던 st.secrets["google_key"]를 그대로 활용할 수 있습니다.
+    # 빅쿼리 클라이언트 설정
     if "google_key" in st.secrets:
         creds_dict = json.loads(st.secrets["google_key"])
         client = bigquery.Client.from_service_account_info(creds_dict)
     else:
         client = bigquery.Client.from_service_account_json('key.json')
 
-    # 2. 쿼리문 작성 (프로젝트ID와 데이터세트ID를 본인의 설정에 맞게 수정하세요)
-    # 예: `my-project.my_dataset.Qrt_rawfinal`
+    # 알려주신 ID 정보를 조합한 쿼리문입니다.
+    # 주소 형식: `프로젝트ID.데이터세트ID.테이블이름`
     query = """
-        SELECT * FROM `본인의_프로젝트_ID.본인의_데이터세트_ID.Qrt_rawfinal`
+        SELECT * FROM `az-datacenter.Qrt_rawfinal.Qrt_rawfinal`
     """
     
-    # 3. 데이터 로드 및 판다스 변환
-    df = client.query(query).to_dataframe()
+    try:
+        # 데이터 가져오기
+        df = client.query(query).to_dataframe()
+    except Exception as e:
+        st.error(f"🚨 빅쿼리에서 데이터를 불러오는 중 오류가 발생했습니다: {e}")
+        st.stop()
 
-    # 4. 전처리 (기존 로직 유지)
+    # 데이터 전처리 (기존 로직 유지)
     df.columns = df.columns.str.strip()
     df = df.loc[:, df.columns != '']
     
-    # 빅쿼리에서 숫자로 들어왔다면 replace가 필요 없을 수 있지만, 안전을 위해 유지
-    if df['검역량'].dtype == object:
+    # 검역량 컬럼 숫자형 변환 및 전처리
+    if '검역량' in df.columns:
         df['검역량'] = pd.to_numeric(df['검역량'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
     
     # 연월 컬럼 생성
-    df['연월'] = df['연'].astype(str) + "-" + df['월'].astype(str).str.zfill(2)
-    
+    if '연' in df.columns and '월' in df.columns:
+        df['연월'] = df['연'].astype(str) + "-" + df['월'].astype(str).str.zfill(2)
+        
     return df
 
 # --- 2. 실시간 데이터(RAW) 불러오기 ---
