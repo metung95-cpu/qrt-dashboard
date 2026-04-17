@@ -6,7 +6,6 @@ import json
 from datetime import datetime
 import calendar
 import time
-from google.cloud import bigquery
 
 st.set_page_config(page_title="검역량 & 오퍼가 & 재고 대시보드", layout="wide")
 
@@ -32,41 +31,18 @@ def get_gspread_client():
         credentials = Credentials.from_service_account_file('key.json', scopes=scope)
     return gspread.authorize(credentials)
 
-# --- 1. 과거 데이터(빅쿼리 Qrt_rawfinal) 불러오기 ---
+# --- 1. 과거 데이터(Qrt) 불러오기 ---
 @st.cache_data(ttl=7200)
 def load_data():
-    # 빅쿼리 클라이언트 설정
-    if "google_key" in st.secrets:
-        creds_dict = json.loads(st.secrets["google_key"])
-        client = bigquery.Client.from_service_account_info(creds_dict)
-    else:
-        client = bigquery.Client.from_service_account_json('key.json')
-
-    # 알려주신 ID 정보를 조합한 쿼리문입니다.
-    # 주소 형식: `프로젝트ID.데이터세트ID.테이블이름`
-    query = """
-        SELECT * FROM `az-datacenter.Qrt_rawfinal.Qrt_rawfinal`
-    """
-    
-    try:
-        # 데이터 가져오기
-        df = client.query(query).to_dataframe()
-    except Exception as e:
-        st.error(f"🚨 빅쿼리에서 데이터를 불러오는 중 오류가 발생했습니다: {e}")
-        st.stop()
-
-    # 데이터 전처리 (기존 로직 유지)
+    gc = get_gspread_client()
+    doc = gc.open('전략데이터 원본데이터') 
+    worksheet = doc.worksheet('Qrt')
+    data = worksheet.get_all_values()
+    df = pd.DataFrame(data[1:], columns=data[0])
     df.columns = df.columns.str.strip()
     df = df.loc[:, df.columns != '']
-    
-    # 검역량 컬럼 숫자형 변환 및 전처리
-    if '검역량' in df.columns:
-        df['검역량'] = pd.to_numeric(df['검역량'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
-    
-    # 연월 컬럼 생성
-    if '연' in df.columns and '월' in df.columns:
-        df['연월'] = df['연'].astype(str) + "-" + df['월'].astype(str).str.zfill(2)
-        
+    df['검역량'] = pd.to_numeric(df['검역량'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+    df['연월'] = df['연'].astype(str) + "-" + df['월'].astype(str).str.zfill(2)
     return df
 
 # --- 2. 실시간 데이터(RAW) 불러오기 ---
@@ -107,27 +83,27 @@ def load_inventory_data():
         worksheet = doc.worksheet('총재고')
         data = worksheet.get_all_values()
         if not data: return pd.DataFrame()
-        
+
         df_inv = pd.DataFrame(data[1:], columns=data[0])
         df_inv.columns = df_inv.columns.str.strip()
         df_inv = df_inv.loc[:, df_inv.columns != ''] # 빈 열 제거
-        
+
         # 💡 [핵심 수정 1] 처음 만들 때부터 데이터 타입을 빡세게 고정 (TypeError 방지)
         if '판매 계획' not in df_inv.columns: df_inv['판매 계획'] = ""
         if '구매 계획' not in df_inv.columns: df_inv['구매 계획'] = ""
-        
+
         if '적정재고' not in df_inv.columns:
             if '판매 계획' in df_inv.columns:
                 idx = df_inv.columns.get_loc('판매 계획')
                 df_inv.insert(idx, '적정재고', 0) # 빈칸("")이 아니라 숫자(0)으로 초기화
             else:
                 df_inv['적정재고'] = 0
-                
+
         # 무조건 숫자는 숫자, 문자는 문자로 형변환 쾅! 박아버리기
         df_inv['적정재고'] = pd.to_numeric(df_inv['적정재고'].astype(str).str.replace(',', ''), errors='coerce').fillna(0).astype(int)
         df_inv['판매 계획'] = df_inv['판매 계획'].astype(str).fillna("")
         df_inv['구매 계획'] = df_inv['구매 계획'].astype(str).fillna("")
-                
+
         return df_inv
     except Exception as e:
         st.error(f"재고 데이터를 불러오는 중 오류 발생: {e}")
@@ -387,6 +363,7 @@ if not df_offer.empty and '보정오퍼가' in df_offer.columns:
 st.markdown("<br><br><br>", unsafe_allow_html=True) 
 st.markdown("---") 
 st.markdown('<div id="inventory"></div>', unsafe_allow_html=True) 
+st.title("📦 AZ광주 재고 및 발주 계획")
 st.title("📦 AZ광주 재고 판매계획")
 
 if not df_inv.empty:
@@ -409,7 +386,7 @@ if not df_inv.empty:
             selected_offer = '전체'
 
     display_inv = df_inv.copy()
-    
+
     if search_query:
         mask = display_inv.apply(lambda row: row.astype(str).str.contains(search_query, case=False).any(), axis=1)
         display_inv = display_inv[mask]
@@ -419,7 +396,7 @@ if not df_inv.empty:
         display_inv = display_inv[display_inv[offer_col] == selected_offer]
 
     st.markdown(f"**현재 조회된 항목:** {len(display_inv)}건 (표 안에서 직접 숫자를 적고 메모를 남길 수 있습니다.)")
-    
+
     editor_config = {
         "적정재고": st.column_config.NumberColumn("적정재고", width="medium", format="%d"),
         "판매 계획": st.column_config.TextColumn("판매 계획 (메모)", width="large"),
@@ -453,11 +430,11 @@ if not df_inv.empty:
 
                     save_df = df_inv.copy()
                     save_df.fillna("", inplace=True)
-                    
+
                     update_data = [save_df.columns.values.tolist()] + save_df.values.tolist()
                     worksheet.clear()
                     worksheet.update('A1', update_data)
-                    
+
                     st.success("✅ 구글 시트에 성공적으로 저장되었습니다!")
                     load_inventory_data.clear()
                     time.sleep(1)
