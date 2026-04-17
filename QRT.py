@@ -31,18 +31,37 @@ def get_gspread_client():
         credentials = Credentials.from_service_account_file('key.json', scopes=scope)
     return gspread.authorize(credentials)
 
-# --- 1. 과거 데이터(Qrt) 불러오기 ---
+# --- 1. 과거 데이터(빅쿼리 Qrt_rawfinal) 불러오기 ---
 @st.cache_data(ttl=7200)
 def load_data():
-    gc = get_gspread_client()
-    doc = gc.open('전략데이터 원본데이터') 
-    worksheet = doc.worksheet('Qrt')
-    data = worksheet.get_all_values()
-    df = pd.DataFrame(data[1:], columns=data[0])
+    # 1. 빅쿼리 클라이언트 생성
+    # 기존에 사용하던 st.secrets["google_key"]를 그대로 활용할 수 있습니다.
+    if "google_key" in st.secrets:
+        creds_dict = json.loads(st.secrets["google_key"])
+        client = bigquery.Client.from_service_account_info(creds_dict)
+    else:
+        client = bigquery.Client.from_service_account_json('key.json')
+
+    # 2. 쿼리문 작성 (프로젝트ID와 데이터세트ID를 본인의 설정에 맞게 수정하세요)
+    # 예: `my-project.my_dataset.Qrt_rawfinal`
+    query = """
+        SELECT * FROM `본인의_프로젝트_ID.본인의_데이터세트_ID.Qrt_rawfinal`
+    """
+    
+    # 3. 데이터 로드 및 판다스 변환
+    df = client.query(query).to_dataframe()
+
+    # 4. 전처리 (기존 로직 유지)
     df.columns = df.columns.str.strip()
     df = df.loc[:, df.columns != '']
-    df['검역량'] = pd.to_numeric(df['검역량'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+    
+    # 빅쿼리에서 숫자로 들어왔다면 replace가 필요 없을 수 있지만, 안전을 위해 유지
+    if df['검역량'].dtype == object:
+        df['검역량'] = pd.to_numeric(df['검역량'].astype(str).str.replace(',', ''), errors='coerce').fillna(0)
+    
+    # 연월 컬럼 생성
     df['연월'] = df['연'].astype(str) + "-" + df['월'].astype(str).str.zfill(2)
+    
     return df
 
 # --- 2. 실시간 데이터(RAW) 불러오기 ---
