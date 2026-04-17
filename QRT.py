@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 import calendar
 import time
+from google.cloud import bigquery
 
 st.set_page_config(page_title="검역량 & 오퍼가 & 재고 대시보드", layout="wide")
 
