@@ -88,7 +88,7 @@ def load_inventory_data():
         df_inv.columns = df_inv.columns.str.strip()
         df_inv = df_inv.loc[:, df_inv.columns != ''] # 빈 열 제거
 
-        # 💡 [핵심 수정 1] 처음 만들 때부터 데이터 타입을 빡세게 고정 (TypeError 방지)
+        # 💡 처음 만들 때부터 데이터 타입을 빡세게 고정 (TypeError 방지)
         if '판매 계획' not in df_inv.columns: df_inv['판매 계획'] = ""
         if '구매 계획' not in df_inv.columns: df_inv['구매 계획'] = ""
 
@@ -335,24 +335,34 @@ st.markdown("<br><br><br>", unsafe_allow_html=True)
 st.markdown("---") 
 st.markdown('<div id="offer"></div>', unsafe_allow_html=True) 
 st.title("💵 오퍼가 분석")
+
 if not df_offer.empty and '보정오퍼가' in df_offer.columns:
-    col_o1, col_o2, col_o3, col_o4 = st.columns(4)
+    # 💡 [수정] 원산지 필터를 포함한 5개 컬럼 레이아웃
+    col_o1, col_o2, col_o3, col_o4, col_o5 = st.columns(5)
     def extract_num(v):
         d = ''.join(filter(str.isdigit, str(v)))
         return int(d) if d else 0
+        
     with col_o1: off_year = st.selectbox("연 선택", ['전체'] + sorted(df_offer['연'].unique(), key=extract_num))
     with col_o2: off_month = st.selectbox("월 선택", ['전체'] + sorted(df_offer['월'].unique(), key=extract_num))
-    with col_o3: off_cat = st.selectbox("대분류 선택", ['전체'] + sorted(df_offer['대분류'].unique()))
-    with col_o4: off_item = st.selectbox("품목명 선택", ['전체'] + sorted(df_offer['품목명'].unique()))
+    with col_o3: off_origin = st.selectbox("원산지 선택", ['전체'] + sorted(df_offer['원산지'].unique())) # 💡 원산지 추가
+    with col_o4: off_cat = st.selectbox("대분류 선택", ['전체'] + sorted(df_offer['대분류'].unique()))
+    with col_o5: off_item = st.selectbox("품목명 선택", ['전체'] + sorted(df_offer['품목명'].unique()))
+    
     filtered_offer = df_offer.copy()
     if off_year != '전체': filtered_offer = filtered_offer[filtered_offer['연'] == off_year]
     if off_month != '전체': filtered_offer = filtered_offer[filtered_offer['월'] == off_month]
+    if off_origin != '전체': filtered_offer = filtered_offer[filtered_offer['원산지'] == off_origin] # 💡 필터 적용
     if off_cat != '전체': filtered_offer = filtered_offer[filtered_offer['대분류'] == off_cat]
     if off_item != '전체': filtered_offer = filtered_offer[filtered_offer['품목명'] == off_item]
+    
     idx_cols = [c for c in ['대분류', '연', '월', '원산지', '품목명', '브랜드', 'EST', '등급'] if c in filtered_offer.columns]
+    
     if idx_cols and not filtered_offer.empty:
         offer_pivot = pd.pivot_table(filtered_offer, values='보정오퍼가', index=idx_cols, aggfunc='mean').reset_index()
-        offer_pivot['보정오퍼가'] = pd.to_numeric(offer_pivot['보정오퍼가']).round(0).apply(lambda x: f"{x:,.0f}")
+        
+        # 💡 [수정] 보정오퍼가 소수점 2번째 자리까지 표시
+        offer_pivot['보정오퍼가'] = pd.to_numeric(offer_pivot['보정오퍼가']).round(2).apply(lambda x: f"{x:,.2f}")
         st.dataframe(offer_pivot, use_container_width=True, hide_index=True)
     else: st.warning("데이터가 없습니다.")
 
@@ -363,7 +373,6 @@ if not df_offer.empty and '보정오퍼가' in df_offer.columns:
 st.markdown("<br><br><br>", unsafe_allow_html=True) 
 st.markdown("---") 
 st.markdown('<div id="inventory"></div>', unsafe_allow_html=True) 
-st.title("📦 AZ광주 재고 및 발주 계획")
 st.title("📦 AZ광주 재고 판매계획")
 
 if not df_inv.empty:
@@ -413,7 +422,7 @@ if not df_inv.empty:
         height=int((len(display_inv) + 1) * 35) + 40
     )
 
-    # 💡 [핵심 수정 2] .update() 대신 열별로 콕 찝어 수동으로 값 밀어넣기 (에러 완벽 차단)
+    # .update() 대신 열별로 콕 찝어 수동으로 값 밀어넣기 (에러 완벽 차단)
     for col in ["적정재고", "판매 계획", "구매 계획"]:
         if col in edited_display.columns:
             df_inv.loc[edited_display.index, col] = edited_display[col]
