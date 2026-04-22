@@ -75,7 +75,7 @@ def load_offer_data():
     return df_offer
 
 # --- 4. AZ광주 재고 데이터 불러오기 ---
-@st.cache_data(ttl=60) # 수정을 자주 하므로 캐시 시간을 짧게 1분으로 설정
+@st.cache_data(ttl=60)
 def load_inventory_data():
     try:
         gc = get_gspread_client()
@@ -86,20 +86,18 @@ def load_inventory_data():
 
         df_inv = pd.DataFrame(data[1:], columns=data[0])
         df_inv.columns = df_inv.columns.str.strip()
-        df_inv = df_inv.loc[:, df_inv.columns != ''] # 빈 열 제거
+        df_inv = df_inv.loc[:, df_inv.columns != '']
 
-        # 💡 처음 만들 때부터 데이터 타입을 빡세게 고정 (TypeError 방지)
         if '판매 계획' not in df_inv.columns: df_inv['판매 계획'] = ""
         if '구매 계획' not in df_inv.columns: df_inv['구매 계획'] = ""
 
         if '적정재고' not in df_inv.columns:
             if '판매 계획' in df_inv.columns:
                 idx = df_inv.columns.get_loc('판매 계획')
-                df_inv.insert(idx, '적정재고', 0) # 빈칸("")이 아니라 숫자(0)으로 초기화
+                df_inv.insert(idx, '적정재고', 0)
             else:
                 df_inv['적정재고'] = 0
 
-        # 무조건 숫자는 숫자, 문자는 문자로 형변환 쾅! 박아버리기
         df_inv['적정재고'] = pd.to_numeric(df_inv['적정재고'].astype(str).str.replace(',', ''), errors='coerce').fillna(0).astype(int)
         df_inv['판매 계획'] = df_inv['판매 계획'].astype(str).fillna("")
         df_inv['구매 계획'] = df_inv['구매 계획'].astype(str).fillna("")
@@ -144,16 +142,31 @@ with tab1:
     col4, col5, col6 = st.columns(3)
     with col4: selected_item = st.selectbox("품목 선택", ['전체'] + sorted(df['품목'].unique()), key="tab1_item")
     with col5: selected_part = st.selectbox("부위 선택", ['전체'] + sorted(df['부위'].unique()), key="tab1_part")
-    with col6: selected_country = st.selectbox("국가별 선택", ['전체'] + sorted(df['국가별'].unique()), key="tab1_country")
+    # 💡 [수정] '전국가 합계' 옵션 추가
+    with col6: selected_country = st.selectbox("국가별 선택", ['전체', '전국가 합계'] + sorted(df['국가별'].unique()), key="tab1_country")
+    
     filtered_df = df.copy()
     if selected_year != '전체': filtered_df = filtered_df[filtered_df['연'] == selected_year]
     if selected_month != '전체': filtered_df = filtered_df[filtered_df['월'] == selected_month]
     if selected_category != '전체': filtered_df = filtered_df[filtered_df['세부구분'] == selected_category]
     if selected_item != '전체': filtered_df = filtered_df[filtered_df['품목'] == selected_item]
     if selected_part != '전체': filtered_df = filtered_df[filtered_df['부위'] == selected_part]
-    if selected_country != '전체': filtered_df = filtered_df[filtered_df['국가별'] == selected_country]
+    # '전체'나 '전국가 합계'가 아닐 때만 개별 국가 필터링 적용
+    if selected_country not in ['전체', '전국가 합계']: 
+        filtered_df = filtered_df[filtered_df['국가별'] == selected_country]
+        
     if not filtered_df.empty:
-        pivot_df = pd.pivot_table(filtered_df, values='검역량', index=['연', '월', '세부구분', '품목', '부위', '국가별'], aggfunc='sum').reset_index()
+        # 💡 [수정] '전국가 합계' 선택 시 피벗 인덱스에서 국가별 제외
+        pivot_idx = ['연', '월', '세부구분', '품목', '부위']
+        if selected_country != '전국가 합계':
+            pivot_idx.append('국가별')
+            
+        pivot_df = pd.pivot_table(filtered_df, values='검역량', index=pivot_idx, aggfunc='sum').reset_index()
+        
+        # '전국가 합계'일 때 표에 해당 텍스트 삽입하여 가독성 높임
+        if selected_country == '전국가 합계':
+            pivot_df.insert(len(pivot_idx), '국가별', '전국가 합계')
+            
         st.markdown("---")
         sort_t1 = st.radio("⬇️ 표 정렬 방식", ["기본", "검역량 내림차순 (큰 수부터)", "검역량 오름차순 (작은 수부터)"], horizontal=True, key="t1_sort")
         if "내림차순" in sort_t1: pivot_df = pivot_df.sort_values('검역량', ascending=False)
@@ -337,7 +350,6 @@ st.markdown('<div id="offer"></div>', unsafe_allow_html=True)
 st.title("💵 오퍼가 분석")
 
 if not df_offer.empty and '보정오퍼가' in df_offer.columns:
-    # 💡 [수정] 원산지 필터를 포함한 5개 컬럼 레이아웃
     col_o1, col_o2, col_o3, col_o4, col_o5 = st.columns(5)
     def extract_num(v):
         d = ''.join(filter(str.isdigit, str(v)))
@@ -345,14 +357,14 @@ if not df_offer.empty and '보정오퍼가' in df_offer.columns:
         
     with col_o1: off_year = st.selectbox("연 선택", ['전체'] + sorted(df_offer['연'].unique(), key=extract_num))
     with col_o2: off_month = st.selectbox("월 선택", ['전체'] + sorted(df_offer['월'].unique(), key=extract_num))
-    with col_o3: off_origin = st.selectbox("원산지 선택", ['전체'] + sorted(df_offer['원산지'].unique())) # 💡 원산지 추가
+    with col_o3: off_origin = st.selectbox("원산지 선택", ['전체'] + sorted(df_offer['원산지'].unique()))
     with col_o4: off_cat = st.selectbox("대분류 선택", ['전체'] + sorted(df_offer['대분류'].unique()))
     with col_o5: off_item = st.selectbox("품목명 선택", ['전체'] + sorted(df_offer['품목명'].unique()))
     
     filtered_offer = df_offer.copy()
     if off_year != '전체': filtered_offer = filtered_offer[filtered_offer['연'] == off_year]
     if off_month != '전체': filtered_offer = filtered_offer[filtered_offer['월'] == off_month]
-    if off_origin != '전체': filtered_offer = filtered_offer[filtered_offer['원산지'] == off_origin] # 💡 필터 적용
+    if off_origin != '전체': filtered_offer = filtered_offer[filtered_offer['원산지'] == off_origin]
     if off_cat != '전체': filtered_offer = filtered_offer[filtered_offer['대분류'] == off_cat]
     if off_item != '전체': filtered_offer = filtered_offer[filtered_offer['품목명'] == off_item]
     
@@ -360,8 +372,6 @@ if not df_offer.empty and '보정오퍼가' in df_offer.columns:
     
     if idx_cols and not filtered_offer.empty:
         offer_pivot = pd.pivot_table(filtered_offer, values='보정오퍼가', index=idx_cols, aggfunc='mean').reset_index()
-        
-        # 💡 [수정] 보정오퍼가 소수점 2번째 자리까지 표시
         offer_pivot['보정오퍼가'] = pd.to_numeric(offer_pivot['보정오퍼가']).round(2).apply(lambda x: f"{x:,.2f}")
         st.dataframe(offer_pivot, use_container_width=True, hide_index=True)
     else: st.warning("데이터가 없습니다.")
@@ -422,7 +432,6 @@ if not df_inv.empty:
         height=int((len(display_inv) + 1) * 35) + 40
     )
 
-    # .update() 대신 열별로 콕 찝어 수동으로 값 밀어넣기 (에러 완벽 차단)
     for col in ["적정재고", "판매 계획", "구매 계획"]:
         if col in edited_display.columns:
             df_inv.loc[edited_display.index, col] = edited_display[col]
